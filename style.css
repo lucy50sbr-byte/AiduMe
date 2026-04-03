@@ -1,0 +1,1447 @@
+:root { 
+    --bg: #050505; --text: #fff; --card: rgba(26, 26, 26, 0.7); 
+    --accent: #e50914; --gold: #ffd700; --nav-h: 70px; 
+    --glass: rgba(10, 10, 10, 0.8);
+}
+.light-mode { --bg: #f5f5f5; --text: #1a1a1a; --card: rgba(255, 255, 255, 0.8); --glass: rgba(240, 240, 240, 0.9); }
+
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; transition: 0.3s; overflow-x: hidden; }
+
+/* Ajuste del header para que no apriete el logo */
+header {
+    background: transparent; 
+    padding: 30px 0 15px 0; 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative; 
+    z-index: 10;
+    width: 100%;
+}
+
+/* Logo con tamaño masivo (360px) */
+.main-logo-hero {
+    height: 360px; /* <--- Subimos de 180px a 360px */
+    width: auto; 
+    max-width: 98%; 
+    object-fit: contain;
+    filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.4)); /* Brillo más intenso para el tamaño */
+    display: block;
+    margin: 0 auto;
+    transition: height 0.3s ease; /* Para que el cambio se sienta fluido */
+}
+
+#app-content {
+    margin-top: -20px; /* Sube todo el contenido hacia el logo */
+}
+
+/* 4. Ajuste para que el login no se rompa */
+#auth-overlay {
+    z-index: 2000;
+}
+
+/* Agrega estos estilos para los inputs del login que faltaban */
+.modern-input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    color: white;
+    outline: none;
+    transition: 0.3s;
+}
+.modern-input:focus {
+    border-color: var(--gold);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.page { display: none; padding: 15px; padding-bottom: 100px; max-width: 800px; margin: auto; min-height: 100vh; }
+.active-page { display: block; }
+
+/*.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; width: 100%; margin-top: 10px; }
+.card { background: var(--card); border-radius: 15px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); cursor: pointer; }
+.card img { width: 100%; height: 200px; object-fit: cover; }
+.card-title { padding: 10px; font-size: 0.75rem; text-align: center; font-weight: bold; }
+*/
+
+.pill-container { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; margin-bottom: 10px; scrollbar-width: none; }
+.pill-container::-webkit-scrollbar { display: none; }
+.pill { background: var(--card); border: 1px solid rgba(255,255,255,0.1); padding: 8px 18px; border-radius: 20px; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
+.pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+/* NUEVO: BOTONES MODERNOS */
+.back-btn {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: 0.3s;
+    margin-bottom: 15px;
+}
+
+.action-btn {
+    background: linear-gradient(45deg, var(--gold), #ffcc00);
+    color: #000;
+    border: none;
+    padding: 14px;
+    border-radius: 15px;
+    font-weight: 800;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+    transition: 0.3s;
+    width: 100%;
+    margin: 15px 0;
+}
+
+.action-btn.in-list {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+}
+
+
+/* ESTRELLAS Y RATING */
+.global-score-container { text-align: center; background: rgba(255,255,255,0.03); padding: 15px; border-radius: 20px; margin: 10px 0; }
+.score-pct { font-size: 2.2rem; font-weight: 900; color: var(--gold); margin: 0; }
+.star { font-size: 2rem; cursor: pointer; color: #333; }
+.star.active { color: var(--gold); }
+
+/*logros*/
+
+.badge-grid {
+    display: flex; /* Cambiamos a flex para un control más fino del espacio */
+    justify-content: center;
+    gap: 25px; /* Más espacio entre ellas */
+    margin-top: 15px;
+    padding: 10px;
+}
+
+/* Brillo ajustable y contenido para insignias */
+.badge.unlocked {
+    filter: grayscale(0) opacity(1);
+    transform: scale(1.1); /* Reducimos un poco el escalado para que no tape a las de al lado */
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
+}
+
+.badge.unlocked::after {
+    content: '';
+    position: absolute;
+    /* Centramos el efecto en el icono */
+    top: 50%;
+    left: 50%;
+    width: 40px; /* Tamaño acorde a la insignia */
+    height: 40px;
+    margin-top: -20px;
+    margin-left: -20px;
+    
+    border-radius: 50%;
+    border: 2px solid var(--gold);
+    box-shadow: 0 0 15px var(--gold);
+    animation: pulseGold 2.5s infinite ease-out; /* Animación más lenta y suave */
+    pointer-events: none;
+}
+
+@keyframes pulseGold {
+    0% { transform: scale(0.8); opacity: 0.8; }
+    100% { transform: scale(1.4); opacity: 0; }
+}
+
+.details-view { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 1000; overflow-y: auto; padding-bottom: 90px; }
+.details-banner { width: 100%; height: 300px; background-size: cover; background-position: center; }
+.details-content { padding: 20px; position: relative; top: -40px; background: var(--bg); border-radius: 30px 30px 0 0; }
+.config-item { display: flex; justify-content: space-between; align-items: center; background: var(--card); padding: 15px; border-radius: 15px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); }
+/*.bottom-nav { position: fixed; bottom: 0; width: 100%; height: var(--nav-h); background: var(--glass); backdrop-filter: blur(20px); display: flex; justify-content: space-around; align-items: center; border-top: 1px solid rgba(255,255,255,0.1); z-index: 100; }
+.nav-item { display: flex; flex-direction: column; align-items: center; font-size: 0.65rem; color: #777; cursor: pointer; }
+.nav-item.active { color: var(--accent); }*/
+#auth-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.auth-card { background: var(--card); padding: 30px; border-radius: 25px; border: 1px solid var(--gold); text-align: center; width: 300px; }
+.auth-btn { background: var(--accent); color: white; border: none; padding: 12px; border-radius: 30px; font-weight: bold; width: 100%; cursor: pointer; }
+
+/* GRUPO DE ENTRADA MODERNA */
+.modern-input-group {
+    display: flex;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 6px;
+    border-radius: 30px; /* Muy redondeado */
+    border: 1px solid rgba(255, 215, 0, 0.1);
+    margin-bottom: 25px;
+    transition: all 0.3s ease;
+    align-items: center;
+}
+
+.modern-input-group:focus-within {
+    border-color: var(--gold);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#comment-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: white;
+    padding: 10px 18px;
+    outline: none;
+    font-size: 0.9rem;
+}
+
+/* BOTÓN POST CIRCULAR GOLD */
+#btn-post {
+    background: var(--gold);
+    border: none;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#btn-post:active {
+    transform: scale(0.8);
+}
+
+.send-icon {
+    font-size: 1.1rem;
+    color: #000; /* Negro para que contraste con el oro */
+    margin-left: -2px; /* Ajuste óptico para centrar el avión */
+}
+
+/* Elimina cualquier estilo viejo de #lista-comentarios div y usa este */
+#lista-comentarios {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 5px 0;
+}
+
+#lista-comentarios div {
+    /* Quitamos animaciones o bordes extra que puedan causar el bug visual */
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(15px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* BARRA DE BÚSQUEDA MODERNA */
+.modern-search-box {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 30px;
+    padding: 5px 5px 5px 15px;
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    margin-right: 10px;
+    transition: 0.3s;
+}
+
+.modern-search-box:focus-within {
+    border-color: var(--gold);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+}
+
+#busqueda {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: white;
+    outline: none;
+    font-size: 0.95rem;
+}
+
+/* BOTÓN DE LUPA CIRCULAR */
+#btn-search-gold {
+    background: var(--gold);
+    border: none;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+#btn-search-gold span {
+    font-size: 1rem;
+    filter: brightness(0.2); /* Lupa oscura para contraste */
+}
+
+.action-btn {
+    min-height: 45px; /* Evita que se colapse o se vea raro */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    /* ... el resto de tu código ... */
+}
+
+/* Contenedor de relaciones con scroll horizontal */
+.relations-scroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 10px 0;
+    margin: 10px 0;
+    scrollbar-width: none; /* Oculta scroll en Firefox */
+}
+
+.relations-scroll::-webkit-scrollbar {
+    display: none; /* Oculta scroll en Chrome/Safari */
+}
+
+/* Contenedor de relaciones con scroll horizontal */
+.relations-scroll {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 10px 0;
+    margin: 10px 0;
+    scrollbar-width: none; /* Oculta scroll en Firefox */
+}
+
+.relations-scroll::-webkit-scrollbar {
+    display: none; /* Oculta scroll en Chrome/Safari */
+}
+
+/* Estilo de los botones de Precuela/Secuela */
+.relation-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    border-radius: 10px;
+    padding: 8px 12px;
+    min-width: 140px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.relation-card:hover {
+    background: rgba(212, 175, 55, 0.1);
+    border-color: var(--gold);
+    transform: translateY(-2px);
+}
+
+.calendario-item {
+    transition: 0.3s;
+    border: 1px solid transparent;
+}
+
+.calendario-item:hover {
+    border-color: var(--gold);
+    transform: scale(1.02);
+    background: rgba(255, 215, 0, 0.05) !important;
+}
+
+.btn-notif:hover {
+    background: var(--gold) !important;
+    color: black !important;
+}
+
+/* El contenedor que organiza las tarjetas */
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 15px;
+    padding: 15px;
+}
+
+/* --- ESTILO ÚNICO DE TARJETA (Póster Vertical) --- */
+.card {
+    width: 130px; /* Ancho idéntico para todos */
+    cursor: pointer;
+    transition: transform 0.3s ease;
+    flex-shrink: 0; /* Evita que el Top 10 las aplaste */
+}
+
+.card img {
+    width: 100%;
+    height: 190px; /* Altura unificada tipo FLV/MAL */
+    object-fit: cover;
+    border-radius: 12px;
+    border: 2px solid var(--gold);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    display: block;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-title {
+    font-size: 0.75rem;
+    margin-top: 8px;
+    color: #fff;
+    text-align: center;
+    font-weight: 600;
+    /* Limita a 2 líneas exactas para no desalinear las filas */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    height: 2.4em; 
+}
+
+/* --- ORGANIZACIÓN: TOP 10 (Scroll Horizontal) --- */
+.horizontal-scroll {
+    display: flex;
+    gap: 15px;
+    overflow-x: auto;
+    padding: 10px 5px 20px 5px;
+    scrollbar-width: none;
+}
+
+/* --- ORGANIZACIÓN: TODOS LOS ANIMES (Cuadrícula) --- */
+#lista-todos {
+    display: grid;
+    /* Crea columnas de 130px automáticas y centradas */
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 20px;
+    padding: 20px 0;
+    justify-items: center; 
+}
+
+.battle-items {
+    display: flex;
+    justify-content: center; /* Centramos los elementos */
+    align-items: center; /* Alineación vertical perfecta */
+    gap: 15px; /* Espacio entre los elementos */
+    margin-top: 25px; /* Un poco más de espacio debajo del título */
+}
+
+.battle-item {
+    flex: 1;
+    max-width: 140px;
+    text-align: center;
+}
+
+.battle-item img {
+    width: 100%;
+    height: 180px; /* Altura fija para que se vean como posters */
+    object-fit: cover;
+    border-radius: 12px;
+    border: 2px solid var(--gold);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    background: #111;
+}
+
+.battle-item p {
+    font-size: 0.75rem;
+    margin: 8px 0;
+    height: 2.4em;
+    overflow: hidden;
+    line-height: 1.2em;
+}
+
+/* --- AJUSTE POSICIÓN TORNEO (BASE DE ORO) --- */
+
+/* 1. Preparamos el contenedor para que los hijos puedan flotar */
+#battle-section {
+    position: relative;
+    padding-top: 50px; /* Espacio extra para que el texto no tape el logo */
+    background: var(--card);
+    border-radius: 20px;
+    padding: 20px;
+    text-align: center;
+}
+
+/* 2. Centramos los textos en el eje X y los bajamos al medio */
+#battle-status, #battle-timer {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    z-index: 10;
+}
+
+/* El título "TORNEO SEMANAL" */
+#battle-status {
+    top: 95px; /* Ajusta este valor según necesites subirlo o bajarlo */
+    font-size: 0.6rem !important;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* El estado "¡VOTA POR TU FAVORITO!" */
+#battle-timer {
+    top: 110px; /* Justo debajo del status */
+    font-size: 0.75rem !important;
+    font-weight: bold;
+    text-shadow: 0 0 10px #000;
+}
+
+/* 3. Bajamos el "VS" para que no choque con el texto flotante */
+.battle-items div[style*="color:red"] {
+    margin-top: 75px !important; /* Lo empuja hacia abajo */
+    font-size: 1.2rem !important;
+    text-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+}
+
+/* Ajuste de las tarjetas de batalla para que no se muevan */
+.battle-item img {
+    border: 2px solid var(--gold);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+    transition: 0.3s;
+}
+
+.battle-item:hover img {
+    transform: scale(1.05);
+    box-shadow: 0 0 25px var(--gold);
+}
+
+/* Resplandor animado constante para el líder */
+.winner-glow img {
+    border-color: var(--gold) !important;
+    transform: scale(1.05); /* El líder se ve ligeramente más grande */
+    transition: all 0.5s ease;
+    /* Animación: 2 segundos, infinita, ida y vuelta suave */
+    animation: winnerPulse 2s infinite alternate; 
+}
+
+@keyframes winnerPulse {
+    from {
+        box-shadow: 0 0 10px var(--gold), 0 0 20px rgba(255, 215, 0, 0.2);
+        filter: brightness(1);
+    }
+    to {
+        box-shadow: 0 0 30px var(--gold), 0 0 50px rgba(255, 215, 0, 0.6);
+        filter: brightness(1.2);
+    }
+}
+
+/* Botón de Cerrar Sesión estilo "Limpiar Historial" */
+.logout-btn {
+    width: 100%;
+    margin-top: 20px;
+    background: rgba(255, 0, 0, 0.1); /* Rojo muy suave de fondo */
+    border: 1px solid #ff4444;       /* Borde rojo vibrante */
+    color: #ff4444;                  /* Texto rojo */
+    padding: 12px;
+    border-radius: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.logout-btn:hover {
+    background: rgba(255, 0, 0, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 68, 68, 0.2);
+}
+
+/* Lista de episodios estilo profesional */
+.episode-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 12px 15px;
+    border-radius: 10px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.episode-row:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-left-color: var(--gold);
+    transform: translateX(5px);
+}
+
+.ep-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.play-icon {
+    color: var(--gold);
+    font-size: 0.8rem;
+    background: rgba(255, 215, 0, 0.1);
+    width: 25px;
+    height: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.ep-name {
+    font-size: 0.85rem;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
+
+.ep-num {
+    font-size: 0.7rem;
+    opacity: 0.5;
+}
+
+.ep-status {
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    opacity: 0.4;
+    font-weight: bold;
+}
+
+.ep-check-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+
+.check-text {
+    font-size: 0.6rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    opacity: 0.5;
+}
+
+/* Diseño del Checkbox Personalizado */
+.custom-checkbox {
+    position: relative;
+    cursor: pointer;
+    font-size: 22px;
+    user-select: none;
+    width: 20px;
+    height: 20px;
+}
+
+.custom-checkbox input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.checkmark {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 20px;
+    width: 20px;
+    background-color: rgba(255,255,255,0.1);
+    border: 2px solid var(--gold);
+    border-radius: 5px;
+    transition: 0.3s;
+}
+
+.custom-checkbox:hover input ~ .checkmark {
+    background-color: rgba(255, 215, 0, 0.2);
+}
+
+.custom-checkbox input:checked ~ .checkmark {
+    background-color: var(--gold);
+}
+
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+}
+
+.custom-checkbox input:checked ~ .checkmark:after {
+    display: block;
+}
+
+.custom-checkbox .checkmark:after {
+    left: 6px;
+    top: 2px;
+    width: 5px;
+    height: 10px;
+    border: solid black;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+#dt-synopsis {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3; /* Limita a 3 líneas */
+    line-height: 1.5em;
+    max-height: 4.5em; /* 1.5em * 3 líneas */
+    overflow: hidden;
+    transition: max-height 0.3s ease; /* Animación suave */
+}
+
+/* Esta clase se activará al hacer clic */
+#dt-synopsis.expanded {
+    display: block; /* Quitamos el modo box para liberar las líneas */
+    -webkit-line-clamp: unset;
+    max-height: none !important;
+}
+
+.filter-wrapper {
+    background: var(--card);
+    border-radius: 15px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    overflow: hidden;
+}
+
+.filter-header {
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    cursor: pointer;
+    font-weight: bold;
+    color: var(--gold);
+}
+
+.filter-panel-content {
+    display: none; /* Se activa con JS */
+    padding: 15px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.filter-group h4 {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+}
+
+.grid-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+/* --- NUEVOS FILTROS ESTILO GOLD --- */
+.filter-container-flv {
+    background: rgba(20, 20, 20, 0.9);
+    padding: 20px;
+    border-radius: 15px;
+    margin: 20px 0;
+    border: 1px solid rgba(255, 215, 0, 0.1);
+}
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: flex-end; /* Alinea el botón con los selectores */
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 140px;
+}
+
+.filter-group label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gold); /* Texto en oro */
+    margin-bottom: 8px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* Selectores con el mismo estilo que el botón */
+.filter-group select {
+    width: 100%;
+    background: #222;
+    color: white;
+    border: 2px solid transparent;
+    padding: 10px 15px;
+    border-radius: 10px;
+    font-weight: bold;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: 0.3s;
+    outline: none;
+    appearance: none; /* Personaliza la flecha */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23ffd700' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: calc(100% - 12px) center;
+}
+
+.filter-group select:hover {
+    border-color: var(--gold);
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+}
+
+.btn-filter-flv {
+    background: linear-gradient(45deg, var(--gold), #ffcc00);
+    color: #000;
+    border: none;
+    padding: 12px 25px;
+    border-radius: 10px;
+    font-weight: 900;
+    cursor: pointer;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    transition: 0.3s;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    height: 46px; /* Altura para emparejar con los select */
+}
+
+.btn-random-gold {
+    background: rgba(255, 215, 0, 0.1);
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    padding: 6px 15px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: 0.3s;
+    margin-bottom: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-random-gold:hover {
+    background: var(--gold);
+    color: #000;
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+/* Ajuste para que el texto del torneo no choque */
+#battle-status {
+    position: static !important; /* Quitamos el posicionamiento absoluto previo */
+    transform: none !important;
+    margin-top: 10px;
+}
+
+@keyframes diceShake {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(10deg); }
+    50% { transform: rotate(-10deg); }
+    75% { transform: rotate(5deg); }
+    100% { transform: rotate(0deg); }
+}
+
+.btn-random-gold:hover i, .btn-random-gold:hover {
+    animation: diceShake 0.5s infinite;
+}
+
+/* Contenedor relativo para posicionar la flecha */
+.scroll-wrapper {
+    position: relative;
+    width: 100%;
+    margin-bottom: 30px;
+}
+
+/* Botón flecha circular sobre la imagen */
+.scroll-arrow-overlay {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.8);
+    color: var(--gold);
+    border: 2px solid var(--gold);
+    border-radius: 50%;
+    width: 45px;
+    height: 45px;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.2rem;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+}
+
+/* Asegura que el scroll horizontal siga funcionando de lado a lado */
+.horizontal-scroll {
+    display: flex;
+    gap: 15px;
+    overflow-x: auto;
+    padding: 10px 5px 20px 5px;
+    scrollbar-width: none;
+}
+
+.horizontal-scroll .card {
+    flex: 0 0 130px; /* No permite que las tarjetas se encojan */
+}
+
+.horizontal-scroll::-webkit-scrollbar {
+    display: none; /* Chrome/Brave */
+}
+
+/* Borrar el "Ver más" si existiera en algún h2 */
+.view-all { display: none !important; }
+
+.grid { 
+    display: grid; 
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); 
+    gap: 15px; 
+    width: 100%; 
+    padding: 10px 0;
+}
+
+.vs-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 120px; /* Ancho ajustado para el GIF */
+    height: 180px; /* Misma altura que las fotos de los animes */
+}
+
+.vs-gif {
+    width: 100%;
+    height: auto;
+    max-height: 100px; /* Controla qué tan grande se ve el VS */
+    object-fit: contain;
+    filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.3)); /* Brillo dorado suave opcional */
+    pointer-events: none; /* Para que el usuario no pueda hacer click en el GIF */
+}
+
+/* Tarjeta Principal de Perfil */
+.profile-header-card {
+    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
+    border-radius: 25px;
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    overflow: hidden;
+    margin-top: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.profile-banner {
+    height: 80px;
+    background: linear-gradient(to right, #b8860b, #ffd700, #b8860b);
+    opacity: 0.3;
+}
+
+.profile-main-info {
+    text-align: center;
+    margin-top: -40px;
+    padding: 0 20px;
+}
+
+.avatar-wrapper {
+    position: relative;
+    width: 90px;
+    height: 90px;
+    margin: 0 auto 10px;
+}
+
+.avatar-wrapper img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 3px solid var(--gold);
+    background: #222;
+}
+
+.level-badge {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background: var(--gold);
+    color: black;
+    font-weight: 900;
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    border-radius: 10px;
+    border: 2px solid #111;
+}
+
+.rank-tag {
+    display: inline-block;
+    background: rgba(255, 215, 0, 0.1);
+    color: var(--gold);
+    padding: 4px 15px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
+/* Stats */
+.profile-stats-row {
+    display: flex;
+    justify-content: space-around;
+    padding: 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.stat-item { text-align: center; }
+.stat-value { display: block; font-size: 1.2rem; font-weight: 900; color: white; }
+.stat-label { font-size: 0.65rem; color: #888; text-transform: uppercase; }
+
+/* XP Bar Pro */
+.xp-section { padding: 20px; }
+.xp-text-group { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 8px; color: #aaa; }
+.xp-container-pro { background: #222; height: 8px; border-radius: 4px; overflow: hidden; }
+.xp-bar-fill { height: 100%; background: linear-gradient(to right, #ffd700, #ff8c00); width: 0%; transition: 1s cubic-bezier(0.17, 0.67, 0.83, 0.67); }
+
+/* Medallas */
+.badge-grid-pro { display: flex; justify-content: center; gap: 15px; padding: 10px; }
+.badge { font-size: 1.8rem; filter: grayscale(1); opacity: 0.2; transition: 0.5s; }
+.badge.unlocked { filter: grayscale(0); opacity: 1; transform: scale(1.1); }
+
+/* Ajustes Pro */
+.settings-container { margin-top: 20px; }
+.config-item-pro { 
+    background: rgba(255,255,255,0.03); 
+    padding: 15px; 
+    border-radius: 15px; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    margin-bottom: 10px;
+}
+.config-info span { display: block; font-size: 0.9rem; font-weight: bold; }
+.config-info small { font-size: 0.7rem; color: #666; }
+
+.logout-btn-pro {
+    width: 100%;
+    background: none;
+    border: 1px solid #ff4444;
+    color: #ff4444;
+    padding: 15px;
+    border-radius: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+/*.btn-normas:hover {
+    background: rgba(255, 215, 0, 0.2) !important;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+    transition: 0.3s;
+}*/
+
+/* Contenedor principal de la barra */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    height: var(--nav-h);
+    background: #000; /* Negro sólido como la imagen */
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    border-top: 1px solid rgba(255, 215, 0, 0.1);
+    z-index: 1000;
+}
+
+/* Estilo de cada botón */
+.nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    color: #fff; /* Texto blanco por defecto */
+    cursor: pointer;
+    transition: all 0.3s ease;
+    filter: grayscale(1); /* Mantiene los iconos en blanco/gris */
+    opacity: 0.7;
+}
+
+/* Iconos o Emojis */
+.nav-item i {
+    font-size: 1.4rem;
+    font-style: normal;
+}
+
+/* ESTADO SELECCIONADO (DORADO) */
+.nav-item.active {
+    color: var(--gold) !important; /* Texto en dorado */
+    filter: grayscale(0); /* Recupera el color original (para la corona o el avatar) */
+    opacity: 1;
+    transform: translateY(-3px); /* Pequeño levante visual */
+}
+
+.nav-item.active i {
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); /* Brillo dorado en el icono */
+}
+
+/* Ajuste especial para el Avatar en el menú */
+.nav-item img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid #fff;
+    transition: 0.3s;
+}
+
+.nav-item.active img {
+    border-color: var(--gold);
+    box-shadow: 0 0 8px var(--gold);
+}
+
+/* Contenedor de Condecoraciones */
+.badge-grid-pro {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 15px;
+    padding: 15px;
+    min-height: 50px;
+}
+
+/* Estilo de las imágenes de insignias */
+.condecoracion-img {
+    width: 45px;
+    height: 45px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.3));
+    transition: transform 0.3s ease, filter 0.3s ease;
+    cursor: help;
+}
+
+.condecoracion-img:hover {
+    transform: scale(1.2) rotate(5deg);
+    filter: drop-shadow(0 0 10px var(--gold));
+}
+
+/* Tooltip básico para navegadores */
+.condecoracion-img[title] {
+    position: relative;
+}
+
+/* --- ESTILO DE LA SECCIÓN DE CONDECORACIONES (Fusionado y Rediseñado) --- */
+
+/* Contenedor principal de la sección (Negro con borde dorado más fino y centrado) */
+.badges-section-card {
+    background: #000; /* Fondo negro absoluto */
+    border: 1.5px solid var(--gold); /* Borde dorado más fino (1.5px) */
+    border-radius: 12px; /* Esquinas un poco más suaves */
+    padding: 15px; /* Espaciado interno reducido */
+    width: 90%; /* Más estrecho que el contenedor principal */
+    max-width: 400px; /* Tamaño máximo para que no se estire demasiado */
+    margin: 20px auto; /* Centrado horizontalmente y con margen vertical */
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.2); /* Brillo dorado sutil alrededor */
+}
+
+
+
+
+
+/* Caja interna: Aumentamos el padding para dar aire a las medallas grandes */
+.inner-badges-box {
+    margin: 15px;
+    padding: 25px 15px;
+    background: rgba(0, 0, 0, 0.5); 
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 20px;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+}
+
+/* Título: Un poco más de margen inferior para las medallas de 80px */
+.section-title-gold.centered {
+    color: var(--gold);
+    text-align: center;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: 25px;
+    font-weight: 900;
+}
+
+/* Medallas: Tamaño de 80px solicitado */
+.condecoracion-img {
+    width: 80px; 
+    height: 80px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.5));
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.condecoracion-img:hover {
+    transform: scale(1.15); /* Escala menor al hacer hover porque ya son grandes */
+    filter: drop-shadow(0 0 20px var(--gold));
+}
+
+/* Grid: Ajustamos el gap para que las medallas de 80px no choquen */
+.badge-grid-pro {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px; /* Más espacio entre medallas */
+}
+
+.btn-normas {
+    width: 100%;
+    background: rgba(255, 215, 0, 0.05);
+    border: 1.5px solid var(--gold); /* Borde más elegante */
+    color: var(--gold);
+    padding: 16px;
+    border-radius: 14px;
+    font-weight: 900;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-top: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    transition: 0.3s;
+    text-transform: uppercase;
+}
+
+/* Botón + sobre el avatar */
+.btn-add-avatar {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: var(--gold);
+    color: black;
+    border: 2px solid #111;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-weight: 900;
+    font-size: 1.2rem;
+    cursor: pointer;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+    transition: 0.3s;
+}
+
+.btn-add-avatar:hover { transform: scale(1.2); }
+
+/* Modal del Selector */
+.modal-gold-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.9);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(5px);
+}
+
+.modal-gold-card {
+    background: #111;
+    border: 1.5px solid var(--gold);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 350px;
+    padding: 20px;
+}
+
+.avatar-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin: 20px 0;
+}
+
+/* Contenedor principal de la tarjeta de carga */
+.admin-upload-card {
+    background: linear-gradient(145deg, #1a1a1a, #0a0a0a);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    padding: 25px;
+    margin-bottom: 30px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+/* Estilo para los títulos internos */
+.admin-upload-card h3 {
+    color: var(--gold);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+}
+
+/* Unificamos el estilo de las tarjetas de administración */
+.admin-upload-card, .admin-card {
+    max-width: 600px; /* Tamaño del Panel de Control */
+    margin: 20px auto; /* Centrado horizontal */
+    background: var(--card);
+    border: 1px solid var(--gold);
+    border-radius: 15px;
+    padding: 20px;
+    box-sizing: border-box; /* Asegura que el padding no estire el ancho */
+}
+
+/* Ajuste de los inputs dentro de la tarjeta de links */
+.input-group-admin {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.input-group-admin .modern-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    border: 1px solid #444;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+
+.video-clipper {
+    position: relative;
+    width: 100%;
+    /* 56.25% es la medida exacta para que sea rectangular 16:9 */
+    padding-bottom: 56.25%; 
+    height: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 2px solid var(--gold);
+    background: #000;
+    margin: 0 auto;
+}
+
+#video-player-container {
+    width: 100%;
+    max-width: 850px; /* Ajusta esto según qué tan ancho quieras el cine */
+    margin: 20px auto;
+    height: auto; /* Que la altura la defina el video-clipper */
+    display: none;
+}
+
+.video-iframe-aidume {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    border: none;
+    z-index: 1;
+    /* Esto evita que se vea deformado */
+    object-fit: contain; 
+}
+
+/* --- REPRODUCTOR LIMPIO (SIN RECTÁNGULO NEGRO) --- */
+
+.video-clipper {
+    position: relative;
+    width: 100%;
+    padding-bottom: 56.25%; /* Aspecto rectangular 16:9 */
+    height: 0;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 2px solid var(--gold);
+    background: #000;
+    margin: 0 auto;
+}
+
+.video-iframe-aidume {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    border: none;
+    z-index: 1;
+}
+
+/* AVISO: Se eliminó la clase .video-patch-gold 
+   para que no aparezca el cuadro negro sobre el video.
+*/
+
+/* Selector de idiomas compacto */
+.idioma-selector-container {
+    display: flex;
+    justify-content: center;
+    gap: 0; /* Unimos los botones */
+    margin-bottom: 15px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 10px;
+    overflow: hidden;
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Ajuste de los botones para alinear imagen y texto */
+.btn-idioma {
+    background: #111;
+    border: none;
+    color: #888;
+    padding: 10px 20px;
+    font-size: 0.8rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: 0.3s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    
+    /* Flexbox para alinear bandera y texto */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px; /* Espacio entre bandera y texto */
+}
+
+/* Estilo para las imágenes de las banderas */
+.flag-icon {
+    width: 22px; /* Tamaño perfecto para no desbordar */
+    height: auto;
+    border-radius: 4px; /* Bordes suaves estilo iPhone */
+    object-fit: cover;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5); /* Sombra para resaltar */
+}
+
+/* Efecto al estar activo o hover */
+.btn-idioma.active {
+    background: var(--gold);
+    color: #000;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+}
+
+.btn-idioma:not(.active):hover {
+    background: #222;
+    color: #fff;
+}
+
+/* Barra de información del video */
+#video-info-display {
+    background: linear-gradient(to right, rgba(255,215,0,0.05), transparent);
+    padding: 10px;
+    border-left: 3px solid var(--gold);
+    margin-top: 10px;
+    border-radius: 0 8px 8px 0;
+}
+
+#video-ep-title {
+    color: var(--gold);
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-shadow: 0 0 5px rgba(0,0,0,0.5);
+}

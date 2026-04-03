@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AiduMe - Modular Gold Edition</title>
+    
+    <link rel="icon" type="image/png" href="logo-aidume">
+    
+    <link rel="stylesheet" href="style.css">
+
+    </head>
+<body>
+    <header>
+    <a href="#" class="logo-container">
+        <img src="logo-grande.png" alt="AiduMe Logo" class="main-logo-hero">
+    </a>
+</header>
+
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <img src="logo-grande.png" alt="Logo" style="width: 150px; margin-bottom: 20px;">
+        
+            
+            <div id="reg-fields">
+                <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
+                <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
+                <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
+            </div>
+
+            <button onclick="ejecutarAuth()" id="main-auth-btn" class="auth-btn" style="width: 100%; padding: 12px; border-radius: 25px; background: var(--accent); color: white; border: none; font-weight: bold; cursor: pointer;">
+                ENTRAR
+            </button>
+            
+            <p id="auth-switch" style="color: var(--gold); font-size: 0.8rem; margin-top: 15px; cursor: pointer;">
+                ¿No tienes cuenta? <span onclick="toggleAuthMode()" style="text-decoration: underline;">Regístrate aquí</span>
+            </p>
+        </div>
+    </div>
+
+    <main id="app-content">
+    <div id="home" class="page active-page">
+        <div id="battle-section">
+            <button onclick="irAnimeAzar()" class="btn-random-gold"><i>🎲</i> Ver anime aleatorio</button>
+            <div id="battle-status">⚔️ TORNEO SEMANAL</div>
+            <div id="battle-timer">¡VOTA POR TU FAVORITO!</div>
+            <div class="battle-items">
+                <div class="battle-item" onclick="votarDuelo(0)">
+                    <img id="img1" src=""><p id="t1"></p><div id="v1" class="voto-label">0 votos</div>
+                </div>
+                <div class="vs-container"><img src="gif.vs.gif" alt="VS" class="vs-gif"></div>
+                <div class="battle-item" onclick="votarDuelo(1)">
+                    <img id="img2" src=""><p id="t2"></p><div id="v2" class="voto-label">0 votos</div>
+                </div>
+            </div>
+            <div id="vote-counter">Votos disponibles: <span id="votos-restantes">3</span>/3</div>
+        </div>
+
+        <div class="search-container">
+            <div class="modern-search-box">
+                <input type="text" id="busqueda" placeholder="Escribe para buscar..." oninput="buscarAnimeLive()">
+                <button onclick="buscarAnime()" id="btn-search-gold"><span>🔍</span></button>
+            </div>
+        </div>
+
+        <div class="filter-container-flv">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label>GÉNERO</label>
+                    <select id="filter-genre-select"><option value="">Todos</option></select>
+                </div>
+                <div class="filter-group">
+                    <label>ESTADO</label>
+                    <select id="filter-status">
+                        <option value="">Todos</option>
+                        <option value="airing">En Emisión</option>
+                        <option value="complete">Finalizado</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>ORDEN</label>
+                    <select id="filter-order"><option value="score">Por Nota</option></select>
+                </div>
+                <button onclick="aplicarFiltrosAvanzados()" class="btn-filter-flv">FILTRAR</button>
+            </div>
+        </div>
+
+        <div class="section-header-gold"><h2 class="section-h">Top 10 mas vistos</h2></div>
+        <div class="scroll-wrapper">
+            <div class="horizontal-scroll" id="lista"></div>
+            <button class="scroll-arrow-overlay" onclick="scrollSection('lista')">❯</button>
+        </div>
+
+        <div class="section-header-gold" style="margin-top: 40px;">
+            <h2 class="section-h">Todos los Animes</h2>
+        </div>
+        <div id="lista-todos"></div> 
+
+        <div id="paginacion-container" style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-top: 30px; padding-bottom: 20px;">
+            <button onclick="cambiarPaginaCompleta(-1)" class="btn-random-gold" id="btn-prev-all" style="width: auto;">❮ Anterior</button>
+            <span id="page-number-all" style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página 1</span>
+            <button onclick="cambiarPaginaCompleta(1)" class="btn-random-gold" id="btn-next-all" style="width: auto;">Siguiente ❯</button>
+        </div>
+    </div> <div id="mis-listas" class="page">
+        <h2 class="section-h">Mis Favoritos</h2>
+        <div id="lista-favoritos" class="grid"></div>
+    </div>
+
+    <div id="historial" class="page">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2 class="section-h" style="margin:0;">Historial</h2>
+            <button onclick="limpiarHistorialUsuario()" class="btn-random-gold" style="border-color:red; color:red;">🗑️ Limpiar</button>
+        </div>
+        <div id="lista-historial" class="grid"></div>
+    </div>
+
+    <div id="calendario" class="page">
+        <h2 class="section-h">Próximos Estrenos</h2>
+        <div id="lista-calendario"></div>
+    </div>
+
+    <div id="perfil" class="page">
+    <div class="profile-header-card">
+        <div class="profile-banner"></div>
+        <div class="profile-main-info">
+            <div class="avatar-wrapper">
+                <button onclick="abrirSelectorAvatar()" class="btn-add-avatar">+</button>
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=User" alt="Avatar" id="user-avatar">
+                <div class="level-badge" id="display-level">1</div>
+            </div>
+            <h2 id="display-user">Usuario</h2>
+            <div class="rank-tag" id="display-rank">ASPIRANTE</div>
+            <p id="display-bio" onclick="editarBio()" style="font-style: italic; font-size: 0.85rem; color: #bbb; margin: 12px auto; cursor: pointer; max-width: 250px;">"Toca aquí para añadir tu frase..."</p>
+        </div>
+
+        <div class="profile-stats-row">
+            <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
+            <div class="stat-item"><span class="stat-label">Tiempo</span><span class="stat-value" id="stat-horas">0h</span></div>
+            <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
+        </div>
+
+        <div class="inner-badges-box">
+            <h3 class="section-title-gold centered">🏆 Condecoraciones</h3>
+            <div class="badge-grid-pro">
+                </div>
+        </div>
+
+        <div class="xp-section">
+            <div class="xp-text-group"><span>Progreso de Nivel</span><span id="xp-text">0/3 XP</span></div>
+            <div class="xp-container-pro"><div id="xp-bar" class="xp-bar-fill"></div></div>
+        </div>
+    </div>
+
+    <button onclick="abrirModalNormas()" class="btn-normas">
+    📜 VER REGLAMENTO DE LA COMUNIDAD
+</button>
+
+<div id="modal-normas" class="modal-gold-overlay" style="display:none;">
+    <div class="modal-gold-card">
+        <h3 class="section-title-gold centered">🛡️ NORMAS DE AIDUME</h3>
+        <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 300px; overflow-y: auto; padding-right: 10px;">
+            <p>1. <b>Respeto:</b> Sin insultos a otros fans.</p>
+            <p>2. <b>Spoilers:</b> No publicar spoilers sin avisar.</p>
+            <p>3. <b>Reportes:</b> El uso indebido de reportes causará el baneo de tu cuenta.</p>
+            <p>4. <b>Autoridad:</b> Las decisiones de Admins son inapelables.</p>
+        </div>
+        <button onclick="cerrarModalNormas()" class="action-btn" style="margin-top: 20px;">ENTENDIDO</button>
+    </div>
+</div>
+
+    <div id="modal-avatar" class="modal-gold-overlay" style="display:none;">
+        <div class="modal-gold-card">
+            <h3 class="section-title-gold centered">🎭 SELECCIONAR AVATAR</h3>
+            <div id="avatar-selector-grid" class="avatar-selector-grid"></div>
+            <button onclick="cerrarSelectorAvatar()" class="action-btn">Cerrar</button>
+        </div>
+    </div>
+
+    <div class="settings-container">
+        <button onclick="cerrarSesion()" class="logout-btn-pro">🚪 Cerrar Sesión</button>
+    </div>
+</div>
+
+
+    <div id="admin-panel" class="page">
+        <h2 class="section-h">🛡️ Panel de Control</h2>
+       <div class="admin-upload-card">
+    <h3 class="section-title-gold">📤 Subir Link de Episodio</h3>
+    <div class="input-group-admin">
+        <select id="adm-idioma" class="modern-input">
+            <option value="sub">🇯🇵 Subtitulado</option>
+            <option value="lat">🇲🇽 Latino</option>
+        </select>
+        <div style="display: flex; gap: 5px;">
+            <input type="number" id="adm-anime-id" placeholder="ID del Anime" class="modern-input" style="flex: 1;">
+            <button onclick="capturarIdActual()" class="btn-random-gold">📌 Capturar</button>
+        </div>
+        <input type="number" id="adm-ep-num" placeholder="Número de Episodio" class="modern-input">
+        <input type="text" id="adm-url" placeholder="URL del Video (Embed)" class="modern-input">
+    </div>
+    <button onclick="guardarLinkEpisodio()" class="btn-filter-flv">✨ GUARDAR ENLACE DE ORO</button>
+</div>
+        <div class="admin-card" style="background: var(--card); padding: 20px; border-radius: 15px; border: 1px solid var(--gold);">
+            <input type="text" id="admin-search-user" placeholder="Nombre de usuario..." class="modern-input" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.05); color:white; border:1px solid #444; padding:10px; border-radius:8px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <label style="font-size: 0.8rem; color: var(--gold); font-weight: bold;">Horas de suspensión:</label>
+                <input type="number" id="admin-suspend-hours" value="2" min="1" class="modern-input" style="width: 60px; padding: 5px; text-align: center; border-radius: 5px;">
+            </div>
+            
+            <div style="display: flex; gap: 10px;">
+                <button onclick="suspenderUsuarioDinamico()" class="btn-filter-flv" style="background: #ff8c00; flex: 1;">Suspender</button>
+                <button onclick="suspenderUsuario(0)" class="btn-filter-flv" style="background: #e50914; flex: 1;">Banear Permanente</button>
+            </div>
+        </div>
+        <h3 class="section-title-gold" style="color:var(--gold); margin-top: 25px;">Comentarios Recientes</h3>
+        <div id="admin-lista-comentarios" class="settings-container"></div>
+    </div>
+</main>
+
+    <div id="details" class="details-view">
+        <div id="dp-img" class="details-banner"></div>
+        <div class="details-content">
+            <button onclick="hideDetails()" class="back-btn">← Volver</button>
+            <h2 id="dt-title"></h2>
+            <div id="lista-episodios-container" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3 style="color: var(--gold); margin: 0; font-size: 1.1rem;">📑 Lista de episodios</h3>
+        <span id="ep-count-badge" style="font-size: 0.75rem; opacity: 0.6;"></span>
+    </div>
+
+   <div id="video-player-container" style="display:none;">
+    <div class="idioma-selector-container">
+        <button onclick="cambiarIdiomaReproductor('lat')" id="btn-lat" class="btn-idioma">
+            <img src="banderas/mx.png" alt="🇲🇽" class="flag-icon">
+            <span class="flag-text">Latino</span>
+        </button>
+        
+       <button onclick="cambiarIdiomaReproductor('sub')" id="btn-sub" class="btn-idioma active">
+    <img src="banderas/jp.png" alt="🇯🇵" class="flag-icon">
+    <span class="flag-text">Subtitulado</span>
+</button>
+    </div>
+
+    <div class="video-clipper">
+    <iframe class="video-iframe-aidume" src="" allowfullscreen></iframe>
+</div>
+
+    <div id="video-info-display">
+        <span id="video-ep-title"></span>
+    </div>
+</div>
+    
+    <div id="grid-episodios" style="display: grid; grid-template-columns: 1fr; gap: 10px; max-height: 400px; overflow-y: auto; padding-right: 5px;">
+        </div>
+</div>
+
+            <div id="anime-relations" class="relations-scroll"></div>
+
+            <div class="global-score-container">
+                <h3 id="score-pct">--%</h3>
+                <div class="rating-box" id="star-box">
+                    <span class="star" onclick="rateAnime(1)">★</span>
+                    <span class="star" onclick="rateAnime(2)">★</span>
+                    <span class="star" onclick="rateAnime(3)">★</span>
+                    <span class="star" onclick="rateAnime(4)">★</span>
+                    <span class="star" onclick="rateAnime(5)">★</span>
+                </div>
+                <p id="rating-status">CALIFICA ESTE ANIME</p>
+            </div>
+
+            <button id="btn-toggle-list" class="action-btn"></button>
+
+            <div id="synopsis-container" style="position:relative; margin-bottom:20px;">
+                <p id="dt-synopsis" style="overflow:hidden; max-height:4.5em; line-height:1.5em; transition:0.3s; margin-bottom:5px;"></p>
+                <button id="btn-read-more" onclick="toggleSynopsis()" style="background:none; border:none; color:var(--gold); font-weight:bold; cursor:pointer; padding:0; display:none; font-size:0.85rem;">Ver más...</button>
+            </div>
+            
+            <div class="comments-section" style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
+                <h4 style="color:var(--gold); margin-bottom: 10px;">💬 Comentarios</h4>
+                <div class="modern-input-group" style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="comment-input" placeholder="¿Qué opinas de este anime?" 
+                           style="flex: 1; padding: 10px; border-radius: 8px; border: none; background: rgba(255,255,255,0.1); color: white; outline: none;">
+                    <button onclick="postearComentario()" style="background: var(--gold); border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; color: black;">
+                        Enviar
+                    </button>
+                </div>
+                <div id="lista-comentarios"></div>
+            </div>
+        </div> 
+    </div>
+
+    <nav class="bottom-nav">
+    <div class="nav-item" onclick="showPage('historial')"><i>📜</i>Historial</div>
+    <div class="nav-item" onclick="showPage('calendario')"><i>📅</i>Calendario</div>
+    <div class="nav-item active" onclick="showPage('home')"><i>🏠</i>Inicio</div>
+    <div class="nav-item" onclick="showPage('mis-listas')"><i>🔖</i>Mis Listas</div>
+    <div class="nav-item" onclick="showPage('perfil')">
+        <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=User" alt="Perfil">
+        Perfil
+    </div>
+</nav>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="auth.js"></script>
+    <script src="ui.js"></script>
+    <script src="api.js"></script>
+</body>
+</html>
