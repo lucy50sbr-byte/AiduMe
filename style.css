@@ -1352,12 +1352,12 @@ header {
 .video-clipper {
     position: relative;
     width: 100%;
-    padding-bottom: 56.25%; /* Aspecto rectangular 16:9 */
+    padding-bottom: 56.25%; 
     height: 0;
     overflow: hidden;
     border-radius: 12px;
     border: 2px solid var(--gold);
-    background: #000;
+    background: transparent; /* <--- Cambia #000 por transparent */
     margin: 0 auto;
 }
 
@@ -1444,4 +1444,177 @@ header {
     font-size: 0.85rem;
     font-weight: bold;
     text-shadow: 0 0 5px rgba(0,0,0,0.5);
+}
+
+/* --- SISTEMA DE CHAT FUSIONADO (BASE DE ORO) --- */
+
+#chat-bubble {
+    position: fixed;
+    bottom: 100px !important; /* Elevado para no tapar la barra inferior */
+    right: 25px !important;
+    width: 60px;
+    height: 60px;
+    background: var(--gold);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    cursor: pointer;
+    z-index: 2000;
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+    transition: transform 0.3s ease;
+}
+
+#chat-bubble:hover {
+    transform: scale(1.1); /* Efecto visual al pasar el mouse */
+}
+
+#chat-window {
+    position: fixed;
+    bottom: 170px !important; /* Posicionado sobre la burbuja */
+    right: 20px !important;
+    width: 280px; /* Un poco más angosto para mejor estética */
+    height: 380px;
+    background: #111;
+    border: 1px solid var(--gold);
+    border-radius: 15px;
+    display: flex;
+    flex-direction: column;
+    z-index: 2000;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+}
+
+/* Ajustes adicionales para el interior del chat */
+.chat-header { 
+    background: var(--gold); 
+    color: #000; 
+    padding: 10px; 
+    display: flex; 
+    justify-content: space-between; 
+    font-weight: bold; 
+}
+
+#chat-messages { 
+    flex: 1; 
+    padding: 10px; 
+    overflow-y: auto; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; 
+    background: #111 !important;
+}
+
+.chat-header { background: var(--gold); color: #000; padding: 10px; display: flex; justify-content: space-between; font-weight: bold; }
+#chat-messages { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.chat-msg { background: rgba(255,255,255,0.05); padding: 8px; border-radius: 8px; font-size: 0.85rem; border-left: 3px solid var(--gold); }
+.chat-input-area { display: flex; padding: 10px; gap: 5px; background: #000; }
+#chat-input { flex: 1; background: #222; border: none; color: white; padding: 8px; border-radius: 5px; outline: none; }
+
+/*chat avatar*/
+.chat-msg-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.chat-avatar-mini {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    border: 1.5px solid var(--gold);
+    background: #222;
+}
+
+.chat-msg-body {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 8px 12px;
+    border-radius: 12px;
+    border-top-left-radius: 2px;
+}
+
+.chat-user-name {
+    color: var(--gold);
+    font-size: 0.75rem;
+    font-weight: 900;
+}
+
+.btn-report-chat {
+    background: none;
+    border: none;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0.3;
+    transition: 0.3s;
+}
+
+.btn-report-chat:hover { opacity: 1; }
+
+/* Asegura que el contenedor de mensajes no sea invisible */
+#chat-messages {
+    background: #111 !important;
+    min-height: 200px;
+}
+
+.chat-text {
+    word-wrap: break-word;
+    color: #eee !important;
+    margin-top: 4px;
+}
+
+/* El avatar que marcaste en la imagen */
+.chat-avatar-mini {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--gold);
+    flex-shrink: 0;
+}
+
+/* Reutilizamos el estilo de los otros modales */
+.modal-gold-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.9);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(5px);
+}
+
+.modal-gold-card {
+    background: #111;
+    border: 1.5px solid var(--gold);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 350px;
+    padding: 20px;
+}
+
+/* Estilo para reportes de chat morados */
+.reporte-morado-glow {
+    box-shadow: 0 0 15px rgba(160, 32, 240, 0.4) !important;
+}
+
+.chat-purple-tag {
+    color: #df80ff;
+    font-weight: bold;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
+/* Brillo para mensajes Premium en el chat */
+.chat-msg-body[style*="gold"] {
+    box-shadow: inset 0 0 15px rgba(255, 215, 0, 0.1);
+    animation: premiumGlow 3s infinite alternate;
+}
+
+@keyframes premiumGlow {
+    from { border-color: var(--gold); }
+    to { border-color: #fff; box-shadow: inset 0 0 20px rgba(255, 215, 0, 0.3); }
 }

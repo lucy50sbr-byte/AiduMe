@@ -1145,81 +1145,142 @@ async function cargarComentariosAdmin() {
     const list = document.getElementById('admin-lista-comentarios');
     if (!list) return;
 
-    list.innerHTML = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Analizando reportes y usuarios...</p>";
+    list.innerHTML = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Analizando y agrupando reportes...</p>";
 
     try {
-        // Traemos el comentario y la lista de reportes con su motivo y quién reportó
-        const { data: c, error } = await _db
-            .from('comentarios')
-            .select('*, reportes(motivo, usuario_reporta)')
-            .order('fecha', { ascending: false });
+        // 1. Traemos todos los reportes crudos de la base de datos
+        const { data: reportesRaw, error } = await _db
+            .from('reportes')
+            .select('*')
+            .order('id', { ascending: false });
 
         if (error) throw error;
         list.innerHTML = "";
 
-        c.forEach(x => {
-            const reportes = x.reportes || [];
-            const tieneReportes = reportes.length > 0;
-            const esOfensivoAuto = typeof contieneOfensa === "function" ? contieneOfensa(x.comentario) : false;
+        if (!reportesRaw || reportesRaw.length === 0) {
+            list.innerHTML = "<p style='text-align:center; opacity:0.5;'>No hay reportes pendientes.</p>";
+            return;
+        }
+
+        // --- 2. LÓGICA DE AGRUPACIÓN (BASE DE ORO) ---
+        const grupos = {};
+
+        for (const r of reportesRaw) {
+            const esChat = (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
             
-            const d = document.createElement('div');
-            d.className = "config-item-pro";
-            d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);";
+            // Agrupamos por motivo en chat o ID de comentario en anime
+            const llaveGrupo = esChat ? r.motivo : `anime_${r.comentario_id}`;
+
+            if (!grupos[llaveGrupo]) {
+                grupos[llaveGrupo] = {
+                    infoBase: r,
+                    denunciantes: [r.usuario_reporta],
+                    cantidad: 1,
+                    esChat: esChat,
+                    idsParaBorrar: [r.id]
+                };
+            } else {
+                grupos[llaveGrupo].cantidad++;
+                if (!grupos[llaveGrupo].denunciantes.includes(r.usuario_reporta)) {
+                    grupos[llaveGrupo].denunciantes.push(r.usuario_reporta);
+                }
+                grupos[llaveGrupo].idsParaBorrar.push(r.id);
+            }
+        }
+
+        // --- 3. RENDERIZADO DE GRUPOS ---
+        for (const key in grupos) {
+            const grupo = grupos[key];
+            const r = grupo.infoBase;
             
-            if (tieneReportes || esOfensivoAuto) {
-                d.style.background = "rgba(229, 9, 20, 0.15)";
-                d.style.border = "1px solid #e50914";
+            let usuarioObjetivo = "Usuario Desconocido";
+            let textoReportado = "Mensaje en vivo";
+
+            // --- EXTRACCIÓN DINÁMICA DE DATOS ---
+            if (grupo.esChat) {
+                // 1. Extraer el nombre del denunciado (entre paréntesis)
+                const matchUser = r.motivo.match(/\(Usuario:\s*([^)]+)\)/);
+                usuarioObjetivo = matchUser ? `@${matchUser[1].trim()}` : "Usuario del Chat";
+
+                // 2. Extraer el MENSAJE REAL (lo que está entre comillas después de 'Mensaje:')
+                const matchMsj = r.motivo.match(/Mensaje:\s*"([^"]+)"/);
+                textoReportado = matchMsj ? `"${matchMsj[1]}"` : "Mensaje original no capturado";
+            } else if (r.comentario_id) {
+                // Para animes buscamos los datos en la tabla de comentarios
+                const { data: comData } = await _db
+                    .from('comentarios')
+                    .select('usuario, comentario')
+                    .eq('id', r.comentario_id)
+                    .maybeSingle();
+                
+                if (comData) {
+                    usuarioObjetivo = `@${comData.usuario}`;
+                    textoReportado = `"${comData.comentario}"`;
+                } else {
+                    textoReportado = "Comentario ya eliminado";
+                }
             }
 
-            // Mapeamos los motivos incluyendo el nombre del usuario que reportó
-            const listaDetallada = reportes.map(r => 
-                `• <span style="color:var(--gold);">${r.usuario_reporta}:</span> ${r.motivo || 'Sin motivo'}`
-            ).join('<br>');
-
-            const masDeCinco = reportes.length > 5;
+            const d = document.createElement('div');
+            d.className = "config-item-pro";
             
-            const motivosHtml = tieneReportes ? `
-                <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.4); border-radius: 8px; font-size: 0.75rem; border: 1px solid rgba(255,255,255,0.05);">
-                    <strong style="color: #ff4444; display: block; margin-bottom: 5px;">Detalles de Reportes:</strong>
-                    <div id="motivos-${x.id}" style="color: #eee; line-height: 1.4;">
-                        ${masDeCinco ? reportes.slice(0, 5).map(r => `• <span style="color:var(--gold);">${r.usuario_reporta}:</span> ${r.motivo}`).join('<br>') : listaDetallada}
-                    </div>
-                    ${masDeCinco ? `
-                        <button onclick="toggleMotivos(this, ${x.id}, \`${listaDetallada.replace(/"/g, '&quot;')}\`, \`${reportes.slice(0, 5).map(r => `• <span style="color:var(--gold);">${r.usuario_reporta}:</span> ${r.motivo}`).join('<br>').replace(/"/g, '&quot;')}\`)" 
-                                style="background:none; border:none; color:var(--gold); cursor:pointer; font-size:0.7rem; padding:0; margin-top:8px; font-weight:bold;">
-                            Ver todos los reportes...
-                        </button>` : ''}
-                </div>
-            ` : '';
+            // Colores según tipo de reporte
+            if (grupo.esChat) {
+                d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(128, 0, 128, 0.15); border: 1px solid #a020f0;";
+            } else {
+                d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(229, 9, 20, 0.12); border: 1px solid #e50914;";
+            }
+
+            // Limpieza visual del motivo (quitamos etiquetas técnicas y el nombre repetido)
+            const motivoLimpio = r.motivo
+                .replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:')
+                .replace(/Motivo:\s*/, '')
+                .replace(/\| Mensaje:\s*"[^"]*"/, '')
+                .replace(/\(Usuario:\s*[^)]+\)/g, '')
+                .trim();
+
+            const listaDenunciantes = grupo.denunciantes.map(u => `@${u}`).join(', ');
 
             d.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                     <div style="flex: 1;">
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                            <span style="color:var(--gold); font-size:0.7rem; font-weight:900; letter-spacing:0.5px;">
-                                ${tieneReportes ? `🚨 ${reportes.length} REPORTES` : 'COMENTARIO RECIENTE'}
+                            <span style="color:var(--gold); font-size:0.7rem; font-weight:900;">
+                                ${grupo.esChat ? '💜 REPORTE DE CHAT' : '🚨 REPORTE DE ANIME'} (${grupo.cantidad})
                             </span>
                             <span style="color:rgba(255,255,255,0.4); font-size:0.7rem;">|</span>
-                            <span style="color:#fff; font-size:0.75rem; font-weight:bold;">@${x.usuario}</span>
+                            <span style="color:#fff; font-size:0.75rem; font-weight:bold;">${usuarioObjetivo}</span>
                         </div>
-                        <p style="color:#eee; margin: 8px 0; font-size: 0.95rem; line-height:1.4; background:rgba(255,255,255,0.03); padding:8px; border-radius:6px;">
-                            "${x.comentario}"
+                        <p style="color:#eee; margin: 5px 0; font-size: 0.9rem; font-style: italic; opacity:0.8;">
+                            ${textoReportado}
                         </p>
-                        ${motivosHtml}
+                        <div style="margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.75rem;">
+                            <strong style="color:var(--gold);">Denunciantes:</strong> ${listaDenunciantes}<br>
+                            <strong style="color:var(--gold);">Último motivo:</strong> ${motivoLimpio || 'Sin descripción adicional'}
+                        </div>
                     </div>
-                    <button onclick="borrarComentarioAdmin(${x.id})" 
-                            style="background:rgba(255,68,68,0.1); border:1px solid #ff4444; color:#ff4444; border-radius:10px; padding:10px; cursor:pointer; transition:0.3s;"
-                            onmouseover="this.style.background='rgba(255,68,68,0.2)'"
-                            onmouseout="this.style.background='rgba(255,68,68,0.1)'">
-                        🗑️
-                    </button>
-                </div>
-            `;
+                    <div style="display:flex; flex-direction:column; gap:5px;">
+                        <button onclick="borrarGrupoReportes([${grupo.idsParaBorrar}])" title="Marcar grupo como revisado"
+                                style="background:rgba(255,255,255,0.1); border:1px solid #666; color:white; border-radius:8px; padding:8px; cursor:pointer;">✔️</button>
+                        
+                        ${!grupo.esChat ? `
+                        <button onclick="borrarComentarioAdmin(${r.comentario_id})" title="Borrar Comentario de Anime"
+                                style="background:rgba(255,68,68,0.1); border:1px solid #ff4444; color:#ff4444; border-radius:8px; padding:8px; cursor:pointer;">🗑️</button>` : ''}
+                    </div>
+                </div>`;
             list.appendChild(d);
-        });
+        }
     } catch (err) {
         console.error("Error Admin:", err.message);
-        list.innerHTML = "<p style='color:red; text-align:center;'>Error al cargar la moderación detallada.</p>";
+        list.innerHTML = `<p style='color:red; text-align:center;'>Error al agrupar reportes: ${err.message}</p>`;
+    }
+}
+
+// Nueva función para borrar el grupo completo de una vez
+async function borrarGrupoReportes(ids) {
+    const { error } = await _db.from('reportes').delete().in('id', ids);
+    if (!error) {
+        cargarComentariosAdmin();
     }
 }
 
@@ -1303,31 +1364,41 @@ async function reportarComentario(comId) {
     }
 }
 
-async function editarBio() {
+// 1. Abre el modal en lugar del prompt feo
+function editarBio() {
     if (!currentUser) return;
-
+    const modal = document.getElementById('modal-bio');
+    const input = document.getElementById('input-bio-nueva');
     const bioActual = document.getElementById('display-bio').innerText.replace(/"/g, '');
-    const nuevaBio = prompt("Escribe tu nueva frase de perfil (máx. 60 caracteres):", bioActual);
+    
+    input.value = bioActual === "Toca aquí para añadir tu frase de perfil..." ? "" : bioActual;
+    modal.style.display = 'flex';
+}
 
-    if (nuevaBio !== null) {
-        const textoFinal = nuevaBio.trim() || "Toca aquí para añadir tu frase de perfil...";
+function cerrarModalBio() {
+    document.getElementById('modal-bio').style.display = 'none';
+}
+
+// 2. Guarda los datos en Supabase
+async function guardarNuevaBio() {
+    const nuevaBio = document.getElementById('input-bio-nueva').value.trim();
+    const textoFinal = nuevaBio || "Toca aquí para añadir tu frase de perfil...";
+    
+    try {
+        const { error } = await _db
+            .from('perfiles')
+            .update({ bio: textoFinal })
+            .eq('nombre', currentUser);
+
+        if (error) throw error;
+
+        // Actualizamos la UI sin recargar
+        document.getElementById('display-bio').innerText = `"${textoFinal}"`;
+        cerrarModalBio();
         
-        try {
-            // Guardar en Supabase
-            const { error } = await _db
-                .from('perfiles')
-                .update({ bio: textoFinal })
-                .eq('nombre', currentUser);
-
-            if (error) throw error;
-
-            // Actualizar visualmente
-            document.getElementById('display-bio').innerText = `"${textoFinal}"`;
-            
-        } catch (err) {
-            console.error("Error al guardar bio:", err.message);
-            alert("No se pudo guardar la frase. Intenta de nuevo.");
-        }
+    } catch (err) {
+        console.error("Error al guardar bio:", err.message);
+        alert("Error de conexión");
     }
 }
 
@@ -1371,6 +1442,7 @@ function cambiarPaginaCompleta(delta) {
 }
 
 async function reproducirEpisodio(titulo, num) {
+    // 1. Guardamos el estado para que el selector de idiomas funcione
     ultimoEpisodioCargado = { titulo, num };
 
     const container = document.getElementById('video-player-container');
@@ -1379,10 +1451,11 @@ async function reproducirEpisodio(titulo, num) {
 
     if (!container || !iframe || !currentAnime) return;
 
+    // Mostramos el contenedor antes de la consulta para evitar sensación de lag
     container.style.display = "block";
 
     try {
-        // Buscamos el link en Supabase con la conexión real (_db)
+        // 2. Consulta a Supabase usando la conexión REAL (_db)
         const { data: enlaceManual, error } = await _db
             .from('enlaces_episodios')
             .select('url_video')
@@ -1397,23 +1470,29 @@ async function reproducirEpisodio(titulo, num) {
         if (enlaceManual && enlaceManual.url_video) {
             urlFinal = enlaceManual.url_video;
         } else {
-            // Respaldo YouTube
+            // Respaldo YouTube si no hay link en tu base de datos
             const sufijo = idiomaActual === 'lat' ? "latino" : "sub español";
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // --- SOLUCIÓN PARA YOURUPLOAD ---
-        // Esto oculta que estás en tu PC y permite que el video cargue
+        // --- 3. BLINDAJE CRÍTICO CONTRA ERROR 403 (REFERRER POLICY) ---
+        // Aplicamos la política de 'no-referrer' de tres formas distintas para asegurar compatibilidad
         iframe.setAttribute('referrerpolicy', 'no-referrer'); 
+        iframe.referrerPolicy = "no-referrer"; 
         
-        // Asignamos la URL una sola vez para evitar parpadeos
+        // Reiniciamos el src a vacío antes de la carga nueva para limpiar peticiones previas
+        iframe.src = ""; 
+        
+        // Asignamos la URL final
         iframe.src = urlFinal;
         
+        // 4. Actualización de la interfaz informativa
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
         }
 
+        // 5. Bajamos suavemente al reproductor
         container.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     } catch (err) {
@@ -1425,14 +1504,14 @@ document.addEventListener('fullscreenchange', () => {
     const iframe = document.querySelector('.video-iframe-aidume');
     if (!iframe) return;
 
+    // Resetear a 100% exacto para que no sobre espacio abajo ni se corte arriba
+    iframe.style.height = "100%"; 
+    iframe.style.clipPath = "none"; 
+
     if (document.fullscreenElement) {
-        // En pantalla completa, usamos un recorte mucho más pequeño (6% en lugar de 8%)
-        iframe.style.height = "106%"; 
-        iframe.style.clipPath = "inset(0% 0% 4% 0%)"; 
-    } else {
-        // Valores normales de la web ajustados
-        iframe.style.height = "108%";
-        iframe.style.clipPath = "none";
+        // En pantalla completa aseguramos que ocupe todo el monitor
+        iframe.style.width = "100vw";
+        iframe.style.height = "100vh";
     }
 });
 
@@ -1520,4 +1599,157 @@ async function guardarLinkEpisodio() {
         console.error("Error al guardar en Supabase:", err.message);
         alert("❌ Error al guardar: " + err.message);
     }
+}
+
+
+
+// Abrir y cerrar el chat
+function toggleChat() {
+    const win = document.getElementById('chat-window');
+    win.style.display = win.style.display === 'none' ? 'flex' : 'none';
+    if(win.style.display === 'flex') cargarMensajesChat();
+}
+
+async function enviarMensajeChat() {
+    const input = document.getElementById('chat-input');
+    const texto = input.value.trim();
+    
+    // Si no hay texto o no hay usuario logueado, no hace nada
+    if(!texto || !currentUser) return; 
+
+    const { error } = await _db.from('chat_global').insert([{ 
+        usuario: currentUser, // Este nombre debe existir en la tabla 'perfiles'
+        mensaje: texto 
+    }]);
+
+    if (error) {
+        console.error("Error al enviar:", error.message);
+    } else {
+        input.value = "";
+        cargarMensajesChat();
+    }
+}
+
+async function cargarMensajesChat() {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+
+    // Solo cargamos mensajes de las últimas 2 horas para mantener la fluidez
+    const tiempoLimite = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+    const { data: mensajes, error } = await _db
+        .from('chat_global')
+        .select(`
+            id, usuario, mensaje, fecha,
+            perfiles (avatar_id, es_premium)
+        `) // --- NUEVO: Traemos el estado premium desde perfiles ---
+        .gt('fecha', tiempoLimite)
+        .order('fecha', { ascending: true });
+
+    if (error) {
+        console.error("Error Chat:", error.message);
+        return;
+    }
+
+    if (mensajes) {
+        container.innerHTML = mensajes.map(m => {
+            // Datos del perfil y sistema de avatares
+            const esPremium = m.perfiles?.es_premium;
+            const avId = m.perfiles?.avatar_id || '1';
+            const avData = AVATARES_RANGOS.find(a => a.id === avId) || AVATARES_RANGOS[0];
+            
+            // --- LÓGICA VISUAL PREMIUM ---
+            // Si es premium, aplicamos borde dorado, fondo especial y posición relativa para la corona
+            const estiloPremium = esPremium 
+                ? 'border: 1.5px solid var(--gold); background: rgba(255, 215, 0, 0.12); position: relative; box-shadow: inset 0 0 10px rgba(255,215,0,0.1);' 
+                : '';
+            
+            // Coronita en la esquina inferior derecha para Premium
+            const coronaPremium = esPremium 
+                ? '<span style="position:absolute; bottom:4px; right:8px; font-size:0.7rem; filter:drop-shadow(0 0 3px gold);">👑</span>' 
+                : '';
+
+            return `
+            <div class="chat-msg-row">
+                <img src="${avData.img}" class="chat-avatar-mini" 
+                     onclick="verPerfilAjeno('${m.usuario}')" 
+                     style="cursor:pointer;">
+                
+                <div class="chat-msg-body" style="${estiloPremium}">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <strong class="chat-user-name" 
+                                onclick="verPerfilAjeno('${m.usuario}')" 
+                                style="cursor:pointer; text-decoration:underline;">
+                            @${m.usuario}
+                        </strong>
+                        <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat">🚩</button>
+                    </div>
+                    
+                    <div class="chat-text" style="color:${esPremium ? 'var(--gold)' : 'white'}; font-size:0.9rem; font-weight:${esPremium ? 'bold' : 'normal'};">
+                        ${m.mensaje}
+                    </div>
+
+                    ${coronaPremium}
+                </div>
+            </div>`;
+        }).join('');
+        
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+// Auto-actualizar el chat cada 10 segundos
+setInterval(() => {
+    if(document.getElementById('chat-window').style.display === 'flex') {
+        cargarMensajesChat();
+    }
+}, 10000);
+
+async function reportarMensajeChat(msjId, usuarioReportado) {
+    if (!currentUser) return alert("Inicia sesión para reportar");
+    
+    // 1. Buscamos el texto del mensaje en la interfaz del chat
+    // Buscamos el elemento que contiene el texto del mensaje reportado
+    const msjRow = document.querySelector(`button[onclick*="${msjId}"]`).closest('.chat-msg-row');
+    const textoMensaje = msjRow ? msjRow.querySelector('.chat-text').innerText : "Mensaje no encontrado";
+
+    const motivoUser = prompt(`🛡️ MODERACIÓN AIDUME\nReportando a @${usuarioReportado}\nEscribe el motivo:`);
+    
+    if (motivoUser && motivoUser.trim().length > 3) {
+        // 2. Guardamos el mensaje real dentro del motivo con un formato que podamos extraer
+        const motivoFinal = `[CHAT_PURPLE] Motivo: ${motivoUser.trim()} | Mensaje: "${textoMensaje}" (Usuario: ${usuarioReportado})`;
+
+        const { error } = await _db.from('reportes').insert([{
+            comentario_id: null, 
+            usuario_reporta: currentUser,
+            motivo: motivoFinal 
+        }]);
+        
+        if (!error) alert("Reporte enviado con el mensaje original.");
+    }
+}
+
+// Funciones para manejar los nuevos modales
+function mostrarAlerta(mensaje, titulo = "🛡️ AVISO AIDUME") {
+    document.getElementById('alerta-titulo').innerText = titulo;
+    document.getElementById('alerta-mensaje').innerText = mensaje;
+    document.getElementById('modal-alerta').style.display = 'flex';
+}
+
+function cerrarAlerta() {
+    document.getElementById('modal-alerta').style.display = 'none';
+}
+
+function abrirNormasRegistro() {
+    document.getElementById('modal-confirmar-normas').style.display = 'flex';
+}
+
+function cerrarConfirmarNormas() {
+    document.getElementById('modal-confirmar-normas').style.display = 'none';
+}
+
+// Esta función se activará al dar clic en "ACEPTO"
+async function aceptarNormasRegistro() {
+    cerrarConfirmarNormas();
+    await procederConRegistro(); // Llamamos a la lógica final
 }

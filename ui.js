@@ -47,68 +47,92 @@ async function showPage(pId) {
     if (activeBtn) activeBtn.classList.add('active'); //
 }
 
-async function actualizarPerfilDesdeSQL() {
-    if (!currentUser) return;
+// Agregamos el parámetro 'nombreAMostrar' que por defecto es el usuario actual
+async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
+    if (!nombreAMostrar) return;
+
+    const esMismoUsuario = (currentUser === nombreAMostrar);
+
+    // --- 0. PREPARACIÓN DE UI Y PRIVACIDAD ---
+    const elementos = {
+        btnAvatar: document.querySelector('.btn-add-avatar'),
+        settings: document.querySelector('.settings-container'),
+        btnNormas: document.querySelector('.btn-normas'),
+        elBio: document.getElementById('display-bio'),
+        elUser: document.getElementById('display-user'),
+        elLevel: document.getElementById('display-level'),
+        elVistos: document.getElementById('stat-vistos'),
+        elHoras: document.getElementById('stat-horas'),
+        elEdad: document.getElementById('display-age'),
+        imgAvatar: document.getElementById('user-avatar'),
+        navAvatar: document.getElementById('nav-avatar')
+    };
+
+    // Control de visibilidad de herramientas de edición
+    if (elementos.btnAvatar) elementos.btnAvatar.style.display = esMismoUsuario ? 'flex' : 'none';
+    if (elementos.settings) elementos.settings.style.display = esMismoUsuario ? 'block' : 'none';
+    if (elementos.btnNormas) elementos.btnNormas.style.display = esMismoUsuario ? 'flex' : 'none';
+    
+    if (elementos.elBio) {
+        elementos.elBio.onclick = esMismoUsuario ? editarBio : null;
+        elementos.elBio.style.cursor = esMismoUsuario ? 'pointer' : 'default';
+    }
 
     try {
-        const { data: perfil, error } = await _db
-            .from('perfiles')
-            .select('*')
-            .eq('nombre', currentUser)
-            .single();
+        // --- 1. FETCH DE DATOS (Perfil + Estadísticas en paralelo) ---
+        // Traemos el perfil y los conteos de una vez para evitar esperas en cascada
+        const [perfilRes, comentariosRes, reportesRes] = await Promise.all([
+            _db.from('perfiles').select('*').eq('nombre', nombreAMostrar).single(),
+            _db.from('comentarios').select('id', { count: 'exact', head: true }).eq('usuario', nombreAMostrar),
+            _db.from('reportes').select('id', { count: 'exact', head: true }).eq('usuario_reporta', nombreAMostrar)
+        ]);
 
-        if (error) throw error;
+        if (perfilRes.error) throw perfilRes.error;
+        const perfil = perfilRes.data;
 
-        // --- 1. CÁLCULO DE DATOS ---
-        const totalVistos = ((perfil.xp || 0) + ((perfil.nivel - 1) * 3));
+        // --- 2. CÁLCULOS ---
+        const totalVistos = (perfil.xp || 0) + ((perfil.nivel - 1) * 3);
+        const horasTotales = Math.floor((totalVistos * 24) / 60);
         
         const fechaRegistro = new Date(perfil.fecha_registro);
-        const hoy = new Date();
-        const aniosAntiguedad = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24 * 365.25);
+        const aniosAntiguedad = (new Date() - fechaRegistro) / (1000 * 60 * 60 * 24 * 365.25);
 
-        // --- 2. ACTUALIZACIÓN DE UI ---
-        document.getElementById('display-user').innerText = perfil.nombre;
-        document.getElementById('display-level').innerText = perfil.nivel;
-        document.getElementById('stat-vistos').innerText = totalVistos;
+        // --- 3. ACTUALIZACIÓN DE TEXTOS Y UI ---
+        if (elementos.elUser) elementos.elUser.innerText = perfil.nombre;
+        if (elementos.elLevel) elementos.elLevel.innerText = perfil.nivel;
+        if (elementos.elVistos) elementos.elVistos.innerText = totalVistos;
+        if (elementos.elHoras) elementos.elHoras.innerText = `${horasTotales}h`;
+        if (elementos.elEdad) elementos.elEdad.innerText = perfil.edad || "--";
 
-        const horasTotales = Math.floor((totalVistos * 24) / 60);
-        const elHoras = document.getElementById('stat-horas');
-        if (elHoras) elHoras.innerText = horasTotales + "h";
-
-        const elEdad = document.getElementById('display-age');
-        if (elEdad) elEdad.innerText = perfil.edad || "--";
-
-        const elBio = document.getElementById('display-bio');
-        if (elBio) {
-            elBio.innerText = perfil.bio ? `"${perfil.bio}"` : "Toca aquí para añadir tu frase de perfil...";
+        if (elementos.elBio) {
+            elementos.elBio.innerText = perfil.bio 
+                ? `"${perfil.bio}"` 
+                : (esMismoUsuario ? "Toca aquí para añadir tu frase..." : "Sin descripción.");
         }
 
-        // --- 3. SISTEMA DE AVATARES POR RANGO (FUSIONADO) ---
-        // Recuperamos el ID del avatar guardado o el '1' por defecto
+        // --- 4. GESTIÓN DE AVATARES ---
         const avatarActualId = perfil.avatar_id || '1';
-        const avatarEncontrado = AVATARES_RANGOS.find(av => av.id === avatarActualId);
+        const avatarEncontrado = AVATARES_RANGOS.find(av => av.id === String(avatarActualId));
 
         if (avatarEncontrado) {
-            // Actualizamos la foto en el perfil y en la barra de navegación
-            document.getElementById('user-avatar').src = avatarEncontrado.img;
-            if (document.getElementById('nav-avatar')) {
-                document.getElementById('nav-avatar').src = avatarEncontrado.img;
+            if (elementos.imgAvatar) elementos.imgAvatar.src = avatarEncontrado.img;
+            // Actualizar miniatura de navegación solo si es el usuario logueado
+            if (esMismoUsuario && elementos.navAvatar) {
+                elementos.navAvatar.src = avatarEncontrado.img;
             }
         }
         
-        // Renderizamos la rejilla de selección para mostrar bloqueos por nivel
-        renderAvatarSelector(perfil.nivel, avatarActualId);
+        // El selector solo aparece para el dueño
+        if (esMismoUsuario) {
+            renderAvatarSelector(perfil.nivel, avatarActualId);
+        }
 
-        // --- 4. CONDECORACIONES ---
-        const [comentariosRes, reportesEfectivos] = await Promise.all([
-            _db.from('comentarios').select('*', { count: 'exact', head: true }).eq('usuario', currentUser),
-            _db.from('reportes').select('id', { count: 'exact', head: true }).eq('usuario_reporta', currentUser)
-        ]);
-
+        // --- 5. LÓGICA DE CONDECORACIONES ---
         const condecoraciones = {
             nivel50: perfil.nivel >= 50,
             unAnio: aniosAntiguedad >= 1,
-            justiciero: comentariosRes.count >= 60 && reportesEfectivos.count >= 30,
+            justiciero: (comentariosRes.count || 0) >= 60 && (reportesRes.count || 0) >= 30,
+             esPremium: perfil.es_premium,
             pionero: perfil.id <= 100,
             veterano3: aniosAntiguedad >= 3
         };
@@ -116,7 +140,7 @@ async function actualizarPerfilDesdeSQL() {
         renderCondecoraciones(condecoraciones);
 
     } catch (err) {
-        console.error("Error en perfil:", err);
+        console.error("Error al cargar el perfil de:", nombreAMostrar, err);
     }
 }
 
@@ -130,7 +154,7 @@ function renderCondecoraciones(cond) {
         { tiene: cond.unAnio, img: "2.png", txt: "Escudo de Valkyrias: 1 año en AiduMe" },
         { tiene: cond.justiciero, img: "3.png", txt: "Emblema León del fuego: 60 comentarios y 30 reportes válidos" },
         { tiene: cond.pionero, img: "4.png", txt: "Cruz de Honor: De los primeros 100 usuarios" },
-        // La 5 queda reservada para Premium
+        { tiene: cond.esPremium, img: "5.png", txt: "Corona Real: Miembro Premium de AiduMe" }, // <-- ACTIVADA
         { tiene: cond.veterano3, img: "6.png", txt: "Orbe Estelar: 3 años de antigüedad" }
     ];
 
@@ -431,6 +455,20 @@ function hideDetails() {
     if (videoContainer) videoContainer.style.display = "none";
 
     if (videoInfo) videoInfo.innerText = "";
+}
+
+async function verPerfilAjeno(nombreUsuario) {
+    // 1. Ocultamos el chat para ver el perfil
+    const win = document.getElementById('chat-window');
+    if (win) win.style.display = 'none';
+
+    // 2. Cambiamos a la pestaña de perfil manualmente
+    // OJO: No usamos showPage('perfil') aquí para evitar el bucle de carga automática
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
+    document.getElementById('perfil').classList.add('active-page');
+
+    // 3. Llamamos a la carga con el nombre del otro usuario
+    actualizarPerfilDesdeSQL(nombreUsuario);
 }
 
 // Único disparador al cargar la web

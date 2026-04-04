@@ -12,64 +12,51 @@ let isRegisterMode = false;
 function toggleAuthMode() {
     isRegisterMode = !isRegisterMode;
     const ageField = document.getElementById('reg-age');
+    const emailField = document.getElementById('reg-email'); //
+    const captchaCont = document.getElementById('captcha-container'); //
     const mainBtn = document.getElementById('main-auth-btn');
-    const switchLink = document.getElementById('auth-switch');
 
     if (isRegisterMode) {
         ageField.style.display = "block";
+        emailField.style.display = "block"; // Se vuelve visible
+        captchaCont.style.display = "block"; // Se vuelve visible
+        generarCaptcha();
         mainBtn.innerText = "CREAR CUENTA";
-        switchLink.innerHTML = '¿Ya tienes cuenta? <span onclick="toggleAuthMode()">Inicia sesión</span>';
     } else {
         ageField.style.display = "none";
+        emailField.style.display = "none"; // Se oculta en login
+        captchaCont.style.display = "none"; // Se oculta en login
         mainBtn.innerText = "ENTRAR";
-        switchLink.innerHTML = '¿No tienes cuenta? <span onclick="toggleAuthMode()">Regístrate aquí</span>';
     }
 }
 
 async function ejecutarAuth() {
     const user = document.getElementById('reg-user').value.trim();
     const pass = document.getElementById('reg-pass').value.trim();
-    const age = document.getElementById('reg-age').value;
 
-    if (!user || !pass) return alert("Usuario y contraseña obligatorios");
+    // Validamos campos base con modal propio
+    if (!user || !pass) return mostrarAlerta("Usuario y contraseña obligatorios");
 
     try {
         if (isRegisterMode) {
-            // --- MODO REGISTRO ---
-            if (!age) return alert("Por favor indica tu edad");
+            // --- MODO REGISTRO (SEGURIDAD DE ORO) ---
+            const email = document.getElementById('reg-email')?.value.trim();
+            const age = document.getElementById('reg-age').value;
+            const captchaInput = document.getElementById('reg-captcha-input')?.value.trim().toUpperCase();
 
-            // 1. AVISO DE NORMAS OBLIGATORIO (NUEVO)
-            const aceptaNormas = confirm(
-                "¡Bienvenido a AiduMe!\n\n" +
-                "Antes de crear tu cuenta, acepta nuestras normas:\n" +
-                "1. Respeto total a los demás fans (sin insultos).\n" +
-                "2. No spoilers sin avisar.\n" +
-                "3. El uso indebido de reportes causará el baneo de TU cuenta.\n" +
-                "4. Las decisiones de Admins y el Dueño son inapelables.\n\n" +
-                "¿Aceptas cumplir el reglamento de la comunidad?"
-            );
-
-            if (!aceptaNormas) return alert("Debes aceptar las normas para unirte a AiduMe.");
-
-            // 2. REGISTRO EN SUPABASE
-            const { data, error } = await _db
-                .from('perfiles')
-                .insert([{ 
-                    nombre: user, 
-                    password: pass, 
-                    edad: parseInt(age),
-                    rol: 'user' // Por seguridad, siempre inicia como user
-                }])
-                .select()
-                .single();
-
-            if (error) {
-                if (error.code === "23505") alert("El nombre de usuario ya está en uso");
-                else throw error;
-            } else {
-                alert("¡Cuenta creada con éxito! Bienvenido a la comunidad.");
-                finalizarLogin(data);
+            // 1. Validaciones básicas
+            if (!email || !age) return mostrarAlerta("Todos los campos (incluyendo Email y Edad) son obligatorios");
+            
+            // 2. Validación de Captcha
+            if (captchaInput !== captchaActual) {
+                mostrarAlerta("Código Captcha incorrecto. Inténtalo de nuevo.");
+                generarCaptcha();
+                return;
             }
+
+            // 3. Apertura del Reglamento de Oro (Sustituye al confirm)
+            // Nota: El botón "ACEPTO" de este modal debe llamar a aceptarNormasRegistro()
+            abrirNormasRegistro();
 
         } else {
             // --- MODO LOGIN ---
@@ -81,23 +68,66 @@ async function ejecutarAuth() {
                 .maybeSingle();
 
             if (error) throw error;
-            if (!perfil) return alert("Usuario o contraseña incorrectos");
+            if (!perfil) return mostrarAlerta("Usuario o contraseña incorrectos");
 
-            // --- VERIFICACIÓN DE BANEO ---
+            // 4. Verificación de Baneo
             if (perfil.baneado_hasta) {
                 const ahora = new Date();
                 const finBaneo = new Date(perfil.baneado_hasta);
                 
                 if (ahora < finBaneo) {
-                    return alert(`⛔ ACCESO DENEGADO\n\nEstás suspendido por infringir las normas.\nFin de la sanción: ${finBaneo.toLocaleString()}`);
+                    return mostrarAlerta(`⛔ ACCESO DENEGADO\n\nEstás suspendido.\nFin de la sanción: ${finBaneo.toLocaleString()}`);
                 }
             }
 
             finalizarLogin(perfil);
         }
     } catch (err) {
-        console.error("Error en el proceso de autenticación:", err.message);
-        alert("Ocurrió un error inesperado. Inténtalo de nuevo.");
+        console.error("Error en Auth:", err.message);
+        mostrarAlerta("Error inesperado: " + err.message);
+    }
+}
+
+// Lógica final de inserción tras aceptar normas en el modal
+async function procederConRegistro() {
+    const user = document.getElementById('reg-user').value.trim();
+    const pass = document.getElementById('reg-pass').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const age = document.getElementById('reg-age').value;
+
+    try {
+        // 5. Control de IP (Máximo 2 cuentas)
+        const userIP = await obtenerIP();
+        const { count, error: ipError } = await _db
+            .from('perfiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('registro_ip', userIP);
+
+        if (ipError) throw ipError;
+        if (count >= 2) return mostrarAlerta("⚠️ Límite de seguridad: Solo se permiten 2 cuentas por conexión.");
+
+        // 6. Registro Final en Supabase
+        const { data, error } = await _db
+            .from('perfiles')
+            .insert([{ 
+                nombre: user, 
+                password: pass, 
+                email: email,
+                edad: parseInt(age),
+                registro_ip: userIP,
+                rol: 'user' 
+            }])
+            .select().single();
+
+        if (error) {
+            if (error.code === "23505") mostrarAlerta("El nombre de usuario o el email ya están registrados.");
+            else throw error;
+        } else {
+            mostrarAlerta("¡Cuenta creada con éxito! Bienvenido a AiduMe.", "✨ BIENVENIDO");
+            setTimeout(() => finalizarLogin(data), 2000);
+        }
+    } catch (err) {
+        mostrarAlerta("Error al registrar: " + err.message);
     }
 }
 
@@ -141,6 +171,28 @@ function solicitarPermisoNotificaciones() {
             }
         });
     }
+}
+
+let captchaActual = "";
+
+// Genera un código aleatorio para el captcha
+function generarCaptcha() {
+    const caracteres = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    captchaActual = "";
+    for (let i = 0; i < 5; i++) {
+        captchaActual += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+    }
+    const elem = document.getElementById('captcha-text');
+    if (elem) elem.innerText = captchaActual;
+}
+
+// Obtiene la IP del usuario usando un servicio gratuito
+async function obtenerIP() {
+    try {
+        const res = await fetch('https://api.ipify.org?format=json');
+        const data = await res.json();
+        return data.ip;
+    } catch (e) { return "127.0.0.1"; }
 }
 
 // Llamar a la función al cargar la web

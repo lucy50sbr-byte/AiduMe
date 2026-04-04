@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta name="referrer" content="no-referrer">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AiduMe - Modular Gold Edition</title>
@@ -23,10 +24,21 @@
         
             
             <div id="reg-fields">
-                <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-                <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-                <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
-            </div>
+    <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
+    <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
+    
+    <input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
+    
+    <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
+
+    <div id="captcha-container" style="display: none; margin-bottom: 15px; background: rgba(255,215,0,0.05); padding: 10px; border-radius: 10px; border: 1px dashed var(--gold);">
+        <p style="font-size: 0.7rem; color: var(--gold); margin-bottom: 5px;">CAPTCHA</p>
+        <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+            <span id="captcha-text" style="font-weight: bold; letter-spacing: 3px; background: #222; padding: 5px 10px; border-radius: 5px; color: #fff; user-select: none;"></span>
+            <input type="text" id="reg-captcha-input" placeholder="Código" class="modern-input" style="width: 80px; text-align: center; padding: 5px;">
+        </div>
+    </div>
+</div>
 
             <button onclick="ejecutarAuth()" id="main-auth-btn" class="auth-btn" style="width: 100%; padding: 12px; border-radius: 25px; background: var(--accent); color: white; border: none; font-weight: bold; cursor: pointer;">
                 ENTRAR
@@ -176,6 +188,28 @@
         </div>
     </div>
 
+    <div id="modal-bio" class="modal-gold-overlay" style="display:none;">
+    <div class="modal-gold-card">
+        <h3 class="section-title-gold centered">📝 TU FRASE DE ORO</h3>
+        <p style="color:rgba(255,255,255,0.6); font-size:0.75rem; text-align:center;">Escribe tu nueva frase de perfil (máx. 60 caracteres)</p>
+        <input type="text" id="input-bio-nueva" class="modern-input" style="width:100%; box-sizing:border-box; margin-bottom:20px;">
+        <div style="display:flex; gap:10px;">
+            <button onclick="guardarNuevaBio()" class="btn-filter-flv" style="flex:1;">GUARDAR</button>
+            <button onclick="cerrarModalBio()" class="btn-random-gold" style="flex:1; margin:0; border-color:#888; color:#888;">CANCELAR</button>
+        </div>
+    </div>
+</div>
+
+<input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
+
+<div id="captcha-container" style="display: none; margin-bottom: 15px; background: rgba(255,215,0,0.05); padding: 10px; border-radius: 10px; border: 1px dashed var(--gold);">
+    <p style="font-size: 0.7rem; color: var(--gold); margin-bottom: 5px;">SISTEMA ANTI-BOT</p>
+    <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+        <span id="captcha-text" style="font-weight: bold; letter-spacing: 3px; background: #222; padding: 5px 10px; border-radius: 5px; color: #fff; user-select: none;"></span>
+        <input type="text" id="reg-captcha-input" placeholder="Código" class="modern-input" style="width: 80px; text-align: center; padding: 5px;">
+    </div>
+</div>
+
     <div class="settings-container">
         <button onclick="cerrarSesion()" class="logout-btn-pro">🚪 Cerrar Sesión</button>
     </div>
@@ -288,6 +322,47 @@
             </div>
         </div> 
     </div>
+
+    <div id="chat-bubble" onclick="toggleChat()">
+    <span>💬</span>
+    <div id="chat-badge" style="display:none;"></div>
+</div>
+
+<div id="chat-window" style="display:none;">
+    <div class="chat-header">
+        <span>Chat de la Comunidad</span>
+        <button onclick="toggleChat()">✖</button>
+    </div>
+    <div id="chat-messages"></div>
+    <div class="chat-input-area">
+        <input type="text" id="chat-input" placeholder="Escribe algo..." onkeypress="if(event.key==='Enter') enviarMensajeChat()">
+        <button onclick="enviarMensajeChat()">🚀</button>
+    </div>
+</div>
+
+<div id="modal-alerta" class="modal-gold-overlay" style="display:none;">
+    <div class="modal-gold-card" style="text-align: center;">
+        <h3 id="alerta-titulo" class="section-title-gold centered">🛡️ AVISO AIDUME</h3>
+        <p id="alerta-mensaje" style="color: #eee; font-size: 0.9rem; margin-bottom: 20px;"></p>
+        <button onclick="cerrarAlerta()" class="btn-filter-flv" style="width: 100%;">ENTENDIDO</button>
+    </div>
+</div>
+
+<div id="modal-confirmar-normas" class="modal-gold-overlay" style="display:none;">
+    <div class="modal-gold-card">
+        <h3 class="section-title-gold centered">📜 REGLAMENTO DE ORO</h3>
+        <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 250px; overflow-y: auto; padding-right: 10px; margin-bottom: 20px;">
+            <p>1. <b>Respeto:</b> Sin insultos a otros fans.</p>
+            <p>2. <b>Spoilers:</b> No publicar spoilers sin avisar.</p>
+            <p>3. <b>Reportes:</b> El uso indebido causa baneo.</p>
+            <p>4. <b>Autoridad:</b> Las decisiones de Admins son inapelables.</p>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <button onclick="aceptarNormasRegistro()" class="btn-filter-flv" style="flex:1;">ACEPTO</button>
+            <button onclick="cerrarConfirmarNormas()" class="btn-random-gold" style="flex:1; border-color:#888; color:#888;">RECHAZAR</button>
+        </div>
+    </div>
+</div>
 
     <nav class="bottom-nav">
     <div class="nav-item" onclick="showPage('historial')"><i>📜</i>Historial</div>
