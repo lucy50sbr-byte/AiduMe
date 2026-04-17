@@ -1448,9 +1448,9 @@ async function reproducirEpisodio(titulo, num) {
     
     if (!container || !currentAnime) return;
 
-    // 1. LIMPIEZA INMEDIATA: Borramos todo lo anterior y ocultamos para el reset
+    // 1. LIMPIEZA INMEDIATA
     container.innerHTML = ""; 
-    container.style.display = "block"; // Lo mostramos, pero estará vacío un instante
+    container.style.display = "block";
 
     try {
         // Consultamos a Supabase
@@ -1469,8 +1469,7 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // 2. EL TRUCO PARA EL APK: Esperamos 150ms antes de crear el iframe
-        // Esto soluciona el error "The media could not be loaded" en Android Studio
+        // 2. EL TRUCO PARA EL APK: Esperamos 200ms (un poquito más para mayor seguridad)
         setTimeout(() => {
             const nuevoIframe = document.createElement('iframe');
             nuevoIframe.className = "video-iframe-aidume";
@@ -1479,8 +1478,14 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // 3. Lógica de Sandbox (YourUpload vs Otros)
-            if (!urlFinal.includes("yourupload")) {
+            // 3. Lógica de Sandbox ANTIPUBLICIDAD (Fusión con Escudo de Hierro)
+            // Si es Mp4Upload o YourUpload, quitamos 'allow-top-navigation' para que no abran nada aparte
+            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+                // ESTE ES EL CAMBIO CLAVE: Quitamos allow-top-navigation
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+                console.log("Escudo estricto activado para servidor externo.");
+            } else {
+                // Para YouTube o servidores internos, mantenemos el sandbox estándar
                 nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
             }
 
@@ -1490,7 +1495,7 @@ async function reproducirEpisodio(titulo, num) {
             
             // Scroll suave al reproductor
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 150);
+        }, 200);
 
         // 4. Actualizamos el texto del episodio
         if (infoText) {
