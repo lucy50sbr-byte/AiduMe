@@ -1478,17 +1478,15 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // 3. Lógica de Sandbox ANTIPUBLICIDAD (Calibrada)
-            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-                // AGREGAMOS: allow-top-navigation-by-user-activation
-                // Esto permite que el Play y la Pantalla Completa funcionen al tocarlos,
-                // pero sigue bloqueando que el anuncio salte automáticamente.
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
-                console.log("Escudo inteligente activado para servidor externo.");
-            } else {
-                // Para YouTube o servidores internos, mantenemos el sandbox estándar
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
-            }
+            // ... dentro de reproducirEpisodio ...
+if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+    // Quitamos 'allow-top-navigation' totalmente. 
+    // Si el video no reproduce, es porque el servidor exige el salto.
+    // En ese caso, el paso de arriba (Java) es el que lo va a frenar.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+} else {
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
+}
 
             // Inyectamos el src y al contenedor
             nuevoIframe.src = urlFinal;
