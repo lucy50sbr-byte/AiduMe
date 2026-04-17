@@ -1478,12 +1478,13 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // 3. Lógica de Sandbox ANTIPUBLICIDAD (Fusión con Escudo de Hierro)
-            // Si es Mp4Upload o YourUpload, quitamos 'allow-top-navigation' para que no abran nada aparte
+            // 3. Lógica de Sandbox ANTIPUBLICIDAD (Calibrada)
             if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-                // ESTE ES EL CAMBIO CLAVE: Quitamos allow-top-navigation
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
-                console.log("Escudo estricto activado para servidor externo.");
+                // AGREGAMOS: allow-top-navigation-by-user-activation
+                // Esto permite que el Play y la Pantalla Completa funcionen al tocarlos,
+                // pero sigue bloqueando que el anuncio salte automáticamente.
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
+                console.log("Escudo inteligente activado para servidor externo.");
             } else {
                 // Para YouTube o servidores internos, mantenemos el sandbox estándar
                 nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
