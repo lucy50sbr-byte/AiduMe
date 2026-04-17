@@ -1482,10 +1482,10 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // 3. LÓGICA DE SANDBOX
             if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-                // Bloqueo estricto: el iframe no puede navegar hacia afuera
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+    // CAMBIO: Agregamos allow-top-navigation-by-user-activation
+    // Esto permite que el src cambie y el video cargue cuando tocas tu botón.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
                 
                 // --- BOTÓN DE PLAY EXTERNO (Solo para servidores externos) ---
                 const btnPlay = document.createElement('button');
