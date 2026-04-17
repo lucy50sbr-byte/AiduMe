@@ -1452,7 +1452,7 @@ async function reproducirEpisodio(titulo, num) {
     container.innerHTML = ""; 
     container.style.display = "block";
     
-    // Quitamos cualquier botón de Play extra de un episodio anterior
+    // Eliminamos cualquier rastro de botones de intentos anteriores
     const botonViejo = document.getElementById('btn-play-extra');
     if (botonViejo) botonViejo.remove();
 
@@ -1473,7 +1473,7 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // 2. CREACIÓN DEL REPRODUCTOR
+        // 2. CREACIÓN DEL REPRODUCTOR (Esperamos 200ms para asegurar estabilidad en Android)
         setTimeout(() => {
             const nuevoIframe = document.createElement('iframe');
             nuevoIframe.className = "video-iframe-aidume";
@@ -1482,44 +1482,25 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
+            // 3. LÓGICA DE SANDBOX EQUILIBRADA
             if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // CAMBIO: Agregamos allow-top-navigation-by-user-activation
-    // Esto permite que el src cambie y el video cargue cuando tocas tu botón.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
-                
-                // --- BOTÓN DE PLAY EXTERNO (Solo para servidores externos) ---
-                const btnPlay = document.createElement('button');
-                btnPlay.id = 'btn-play-extra';
-                btnPlay.innerHTML = "▶ INICIAR VIDEO";
-                btnPlay.style.cssText = `
-                    display: block; width: 100%; margin-top: 15px; padding: 15px;
-                    background-color: #ffc107; color: #000; font-weight: bold;
-                    border: none; border-radius: 8px; font-size: 16px;
-                `;
-
-                btnPlay.onclick = () => {
-                    // Agregamos autoplay a la URL para forzar el inicio
-                    nuevoIframe.src = urlFinal.includes('?') ? `${urlFinal}&autoplay=1` : `${urlFinal}?autoplay=1`;
-                    btnPlay.innerHTML = "⌛ Cargando episodio...";
-                    btnPlay.style.opacity = "0.7";
-                };
-
-                // Insertamos el botón debajo del contenedor de video
-                container.parentNode.insertBefore(btnPlay, container.nextSibling);
-
+                // Usamos allow-top-navigation-by-user-activation: 
+                // Esto permite que el video cargue y responda a tu click, 
+                // pero el Java de Android bloqueará si intenta abrir la pantalla blanca.
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
             } else {
-                // Para YouTube mantenemos navegación superior para anuncios internos de YT
+                // Configuración estándar para YouTube
                 nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
             }
 
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
             
-            // Scroll suave
+            // Scroll suave al reproductor para centrar la vista
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 200);
 
-        // 4. ACTUALIZAR TÍTULO
+        // 4. ACTUALIZAR TÍTULO E IDIOMA
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
