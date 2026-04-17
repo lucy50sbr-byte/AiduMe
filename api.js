@@ -1480,7 +1480,7 @@ async function reproducirEpisodio(titulo, num) {
         
         // 3. LA CLAVE: Solo ponemos sandbox si NO es YourUpload
         if (!urlFinal.includes("yourupload")) {
-            nuevoIframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+            nuevoiframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation");
         } else {
             // YourUpload necesita estar TOTALMENTE libre para cargar en local
             console.log("YourUpload detectado: Cargando sin restricciones de sandbox.");
