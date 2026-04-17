@@ -1482,16 +1482,13 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // 3. LÓGICA DE SANDBOX EQUILIBRADA
-            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-                // Usamos allow-top-navigation-by-user-activation: 
-                // Esto permite que el video cargue y responda a tu click, 
-                // pero el Java de Android bloqueará si intenta abrir la pantalla blanca.
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
-            } else {
-                // Configuración estándar para YouTube
-                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
-            }
+            // ... dentro de reproducirEpisodio en api.js ...
+if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+    // BLOQUEO RADICAL: Quitamos cualquier tipo de navigation. 
+    // Solo permitimos scripts y mismos orígenes para que el reproductor funcione por dentro.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+    console.log("Escudo de Hierro activado: Navegación prohibida.");
+}
 
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
