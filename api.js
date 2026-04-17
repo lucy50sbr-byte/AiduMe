@@ -1451,7 +1451,10 @@ async function reproducirEpisodio(titulo, num) {
 
     if (!container || !iframe || !currentAnime) return;
 
-    // Mostramos el contenedor antes de la consulta para evitar sensación de lag
+    // Limpiamos el iframe antes de empezar para evitar errores de carga previa
+    iframe.src = "about:blank";
+
+    // Mostramos el contenedor antes de la consulta
     container.style.display = "block";
 
     try {
@@ -1475,18 +1478,30 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // --- 3. BLINDAJE CRÍTICO CONTRA ERROR 403 (REFERRER POLICY) ---
-        // Aplicamos la política de 'no-referrer' de tres formas distintas para asegurar compatibilidad
+        // --- 3. CONFIGURACIÓN DINÁMICA DE SEGURIDAD ---
+        
+        // VITAL: YourUpload detecta si vienes de un servidor local o desconocido. 
+        // 'no-referrer' oculta tu origen para que no te bloqueen.
         iframe.setAttribute('referrerpolicy', 'no-referrer'); 
-        iframe.referrerPolicy = "no-referrer"; 
         
-        // Reiniciamos el src a vacío antes de la carga nueva para limpiar peticiones previas
-        iframe.src = ""; 
-        
-        // Asignamos la URL final
+        // --- 🛡️ SISTEMA ANTI-ANUNCIOS INTELIGENTE ---
+        const esYourUpload = urlFinal.toLowerCase().includes("yourupload");
+        const esMega = urlFinal.toLowerCase().includes("mega.nz");
+
+        if (esYourUpload || esMega) {
+            // YourUpload necesita ejecutar pop-ups y redirecciones internas para mostrar el video.
+            // Si le ponemos 'sandbox', el video se queda infinitamente cargando o en blanco.
+            iframe.removeAttribute('sandbox');
+        } else {
+            // Para Ok.ru y otros, bloqueamos pop-ups pero permitimos scripts del reproductor.
+            // Agregamos 'allow-forms' por si el reproductor lo necesita.
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+        }
+
+        // 4. Asignamos la URL final
         iframe.src = urlFinal;
         
-        // 4. Actualización de la interfaz informativa
+        // Actualizamos el título e icono de idioma
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
@@ -1497,6 +1512,7 @@ async function reproducirEpisodio(titulo, num) {
 
     } catch (err) {
         console.error("Error en AiduMe Player:", err.message);
+        alert("Hubo un error al cargar el video. Intenta de nuevo.");
     }
 }
 
