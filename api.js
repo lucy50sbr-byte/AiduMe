@@ -1451,6 +1451,10 @@ async function reproducirEpisodio(titulo, num) {
     // 1. LIMPIEZA INMEDIATA
     container.innerHTML = ""; 
     container.style.display = "block";
+    
+    // Quitamos cualquier botón de Play extra de un episodio anterior
+    const botonViejo = document.getElementById('btn-play-extra');
+    if (botonViejo) botonViejo.remove();
 
     try {
         // Consultamos a Supabase
@@ -1469,7 +1473,7 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // 2. EL TRUCO PARA EL APK: Esperamos 200ms (un poquito más para mayor seguridad)
+        // 2. CREACIÓN DEL REPRODUCTOR
         setTimeout(() => {
             const nuevoIframe = document.createElement('iframe');
             nuevoIframe.className = "video-iframe-aidume";
@@ -1478,25 +1482,44 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // ... dentro de reproducirEpisodio ...
-if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // Quitamos 'allow-top-navigation' totalmente. 
-    // Si el video no reproduce, es porque el servidor exige el salto.
-    // En ese caso, el paso de arriba (Java) es el que lo va a frenar.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
-} else {
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
-}
+            // 3. LÓGICA DE SANDBOX
+            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+                // Bloqueo estricto: el iframe no puede navegar hacia afuera
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+                
+                // --- BOTÓN DE PLAY EXTERNO (Solo para servidores externos) ---
+                const btnPlay = document.createElement('button');
+                btnPlay.id = 'btn-play-extra';
+                btnPlay.innerHTML = "▶ INICIAR VIDEO";
+                btnPlay.style.cssText = `
+                    display: block; width: 100%; margin-top: 15px; padding: 15px;
+                    background-color: #ffc107; color: #000; font-weight: bold;
+                    border: none; border-radius: 8px; font-size: 16px;
+                `;
 
-            // Inyectamos el src y al contenedor
+                btnPlay.onclick = () => {
+                    // Agregamos autoplay a la URL para forzar el inicio
+                    nuevoIframe.src = urlFinal.includes('?') ? `${urlFinal}&autoplay=1` : `${urlFinal}?autoplay=1`;
+                    btnPlay.innerHTML = "⌛ Cargando episodio...";
+                    btnPlay.style.opacity = "0.7";
+                };
+
+                // Insertamos el botón debajo del contenedor de video
+                container.parentNode.insertBefore(btnPlay, container.nextSibling);
+
+            } else {
+                // Para YouTube mantenemos navegación superior para anuncios internos de YT
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
+            }
+
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
             
-            // Scroll suave al reproductor
+            // Scroll suave
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 200);
 
-        // 4. Actualizamos el texto del episodio
+        // 4. ACTUALIZAR TÍTULO
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
