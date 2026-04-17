@@ -1479,12 +1479,12 @@ async function reproducirEpisodio(titulo, num) {
         nuevoIframe.setAttribute('frameborder', '0');
         
         // 3. LA CLAVE: Solo ponemos sandbox si NO es YourUpload
-        if (!urlFinal.includes("yourupload")) {
-            nuevoiframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation");
-        } else {
-            // YourUpload necesita estar TOTALMENTE libre para cargar en local
-            console.log("YourUpload detectado: Cargando sin restricciones de sandbox.");
-        }
+if (!urlFinal.includes("yourupload")) {
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
+} else {
+    // YourUpload necesita estar TOTALMENTE libre para cargar en local
+    console.log("YourUpload detectado: Cargando sin restricciones de sandbox.");
+}
 
         // 4. Inyectar y cargar
         container.appendChild(nuevoIframe);

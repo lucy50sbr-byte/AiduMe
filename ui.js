@@ -443,17 +443,21 @@ async function cambiarAvatar(id, url) {
 
 function hideDetails() { 
     const details = document.getElementById('details');
-    // CAMBIO AQUÍ: También usamos la clase para encontrar el iframe y apagarlo
-    const iframe = document.querySelector('.video-iframe-aidume');
     const videoContainer = document.getElementById('video-player-container');
     const videoInfo = document.getElementById('video-ep-title');
 
+    // 1. Ocultamos el panel de detalles
     if (details) details.style.display = "none";
     
-    if (iframe) iframe.src = ""; // Detener audio/video correctamente
+    // 2. FUSIÓN: En lugar de buscar el iframe y limpiar el src, 
+    // vaciamos el contenedor por completo. 
+    // Al hacer innerHTML = "", el iframe (y su audio) dejan de existir al instante.
+    if (videoContainer) {
+        videoContainer.innerHTML = ""; 
+        videoContainer.style.display = "none";
+    }
 
-    if (videoContainer) videoContainer.style.display = "none";
-
+    // 3. Limpiamos el título para que no aparezca el anterior al abrir otro anime
     if (videoInfo) videoInfo.innerText = "";
 }
 
