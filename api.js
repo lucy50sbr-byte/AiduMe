@@ -1448,13 +1448,12 @@ async function reproducirEpisodio(titulo, num) {
     
     if (!container || !currentAnime) return;
 
-    // 1. ELIMINACIÓN RADICAL: Borramos el iframe viejo por completo
-    const oldIframe = document.querySelector('.video-iframe-aidume');
-    if (oldIframe) oldIframe.remove();
-
-    container.style.display = "block";
+    // 1. LIMPIEZA INMEDIATA: Borramos todo lo anterior y ocultamos para el reset
+    container.innerHTML = ""; 
+    container.style.display = "block"; // Lo mostramos, pero estará vacío un instante
 
     try {
+        // Consultamos a Supabase
         const { data: enlaceManual } = await _db
             .from('enlaces_episodios')
             .select('url_video')
@@ -1470,35 +1469,37 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // 2. CREACIÓN DE IFRAME VIRGEN
-        const nuevoIframe = document.createElement('iframe');
-        nuevoIframe.className = "video-iframe-aidume";
-        nuevoIframe.width = "100%";
-        nuevoIframe.height = "100%";
-        nuevoIframe.setAttribute('allowfullscreen', 'true');
-        nuevoIframe.setAttribute('frameborder', '0');
-        
-        // 3. LA CLAVE: Solo ponemos sandbox si NO es YourUpload
-if (!urlFinal.includes("yourupload")) {
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
-} else {
-    // YourUpload necesita estar TOTALMENTE libre para cargar en local
-    console.log("YourUpload detectado: Cargando sin restricciones de sandbox.");
-}
+        // 2. EL TRUCO PARA EL APK: Esperamos 150ms antes de crear el iframe
+        // Esto soluciona el error "The media could not be loaded" en Android Studio
+        setTimeout(() => {
+            const nuevoIframe = document.createElement('iframe');
+            nuevoIframe.className = "video-iframe-aidume";
+            nuevoIframe.style.width = "100%";
+            nuevoIframe.style.height = "100%";
+            nuevoIframe.setAttribute('allowfullscreen', 'true');
+            nuevoIframe.setAttribute('frameborder', '0');
+            
+            // 3. Lógica de Sandbox (YourUpload vs Otros)
+            if (!urlFinal.includes("yourupload")) {
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation allow-popups");
+            }
 
-        // 4. Inyectar y cargar
-        container.appendChild(nuevoIframe);
-        nuevoIframe.src = urlFinal;
+            // Inyectamos el src y al contenedor
+            nuevoIframe.src = urlFinal;
+            container.appendChild(nuevoIframe);
+            
+            // Scroll suave al reproductor
+            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 150);
 
+        // 4. Actualizamos el texto del episodio
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
         }
 
-        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
     } catch (err) {
-        console.error("Error:", err);
+        console.error("Error en el reproductor:", err);
     }
 }
 
