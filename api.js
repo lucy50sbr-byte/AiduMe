@@ -1442,24 +1442,20 @@ function cambiarPaginaCompleta(delta) {
 }
 
 async function reproducirEpisodio(titulo, num) {
-    // 1. Guardamos el estado para que el selector de idiomas funcione
     ultimoEpisodioCargado = { titulo, num };
-
     const container = document.getElementById('video-player-container');
-    const iframe = document.querySelector('.video-iframe-aidume'); 
     const infoText = document.getElementById('video-ep-title');
+    
+    if (!container || !currentAnime) return;
 
-    if (!container || !iframe || !currentAnime) return;
+    // 1. ELIMINACIÓN RADICAL: Borramos el iframe viejo por completo
+    const oldIframe = document.querySelector('.video-iframe-aidume');
+    if (oldIframe) oldIframe.remove();
 
-    // Limpiamos el iframe antes de empezar para evitar errores de carga previa
-    iframe.src = "about:blank";
-
-    // Mostramos el contenedor antes de la consulta
     container.style.display = "block";
 
     try {
-        // 2. Consulta a Supabase usando la conexión REAL (_db)
-        const { data: enlaceManual, error } = await _db
+        const { data: enlaceManual } = await _db
             .from('enlaces_episodios')
             .select('url_video')
             .eq('anime_id', currentAnime.mal_id)
@@ -1467,52 +1463,42 @@ async function reproducirEpisodio(titulo, num) {
             .eq('idioma', idiomaActual)
             .maybeSingle();
 
-        if (error) throw error;
-
-        let urlFinal;
-        if (enlaceManual && enlaceManual.url_video) {
-            urlFinal = enlaceManual.url_video;
-        } else {
-            // Respaldo YouTube si no hay link en tu base de datos
+        let urlFinal = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
+        
+        if (!urlFinal) {
             const sufijo = idiomaActual === 'lat' ? "latino" : "sub español";
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // --- 3. CONFIGURACIÓN DINÁMICA DE SEGURIDAD ---
+        // 2. CREACIÓN DE IFRAME VIRGEN
+        const nuevoIframe = document.createElement('iframe');
+        nuevoIframe.className = "video-iframe-aidume";
+        nuevoIframe.width = "100%";
+        nuevoIframe.height = "100%";
+        nuevoIframe.setAttribute('allowfullscreen', 'true');
+        nuevoIframe.setAttribute('frameborder', '0');
         
-        // VITAL: YourUpload detecta si vienes de un servidor local o desconocido. 
-        // 'no-referrer' oculta tu origen para que no te bloqueen.
-        iframe.setAttribute('referrerpolicy', 'no-referrer'); 
-        
-        // --- 🛡️ SISTEMA ANTI-ANUNCIOS INTELIGENTE ---
-        const esYourUpload = urlFinal.toLowerCase().includes("yourupload");
-        const esMega = urlFinal.toLowerCase().includes("mega.nz");
-
-        if (esYourUpload || esMega) {
-            // YourUpload necesita ejecutar pop-ups y redirecciones internas para mostrar el video.
-            // Si le ponemos 'sandbox', el video se queda infinitamente cargando o en blanco.
-            iframe.removeAttribute('sandbox');
+        // 3. LA CLAVE: Solo ponemos sandbox si NO es YourUpload
+        if (!urlFinal.includes("yourupload")) {
+            nuevoIframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
         } else {
-            // Para Ok.ru y otros, bloqueamos pop-ups pero permitimos scripts del reproductor.
-            // Agregamos 'allow-forms' por si el reproductor lo necesita.
-            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+            // YourUpload necesita estar TOTALMENTE libre para cargar en local
+            console.log("YourUpload detectado: Cargando sin restricciones de sandbox.");
         }
 
-        // 4. Asignamos la URL final
-        iframe.src = urlFinal;
-        
-        // Actualizamos el título e icono de idioma
+        // 4. Inyectar y cargar
+        container.appendChild(nuevoIframe);
+        nuevoIframe.src = urlFinal;
+
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
             infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
         }
 
-        // 5. Bajamos suavemente al reproductor
         container.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     } catch (err) {
-        console.error("Error en AiduMe Player:", err.message);
-        alert("Hubo un error al cargar el video. Intenta de nuevo.");
+        console.error("Error:", err);
     }
 }
 
