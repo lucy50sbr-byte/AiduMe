@@ -133,15 +133,23 @@ async function procederConRegistro() {
 
 // En auth.js, busca finalizarLogin y agrega la línea al final
 function finalizarLogin(perfil) {
+    // Guardamos los datos en el almacenamiento local
     localStorage.setItem('aidume_profile', JSON.stringify({ 
         name: perfil.nombre, 
         age: perfil.edad,
         rol: perfil.rol || 'user'
     }));
     
-    // Solo pedimos permiso si el login fue exitoso
+    // Mostramos el icono de chat antes de cualquier otra acción
+    const chatBubble = document.getElementById('chat-bubble');
+    if (chatBubble) {
+        chatBubble.style.display = 'flex';
+    }
+
+    // Pedimos permiso de notificaciones
     solicitarPermisoNotificaciones(); 
 
+    // Al recargar la página, el sistema debe leer el localStorage para mantenerlo visible
     location.reload();
 }
 
@@ -153,6 +161,11 @@ window.onload = checkUser;
 function cerrarSesion() {
     if(confirm("¿Cerrar sesión?")) {
         localStorage.clear();
+        
+        // Esto asegura que desaparezca antes de recargar
+        const chatBubble = document.getElementById('chat-bubble');
+        if (chatBubble) chatBubble.style.display = 'none';
+
         location.reload();
     }
 }
@@ -197,3 +210,14 @@ async function obtenerIP() {
 
 // Llamar a la función al cargar la web
 window.addEventListener('load', solicitarPermisoNotificaciones);
+
+window.addEventListener('load', () => {
+    const perfilGuardado = localStorage.getItem('aidume_profile');
+    const chatBubble = document.getElementById('chat-bubble');
+    
+    if (perfilGuardado && chatBubble) {
+        chatBubble.style.display = 'flex';
+    } else if (chatBubble) {
+        chatBubble.style.display = 'none';
+    }
+});
