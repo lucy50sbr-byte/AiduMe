@@ -1482,12 +1482,13 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // ... dentro de reproducirEpisodio en api.js ...
-if (urlFinal.includes("mp4upload")) {
-    // Solo permitimos scripts y mismos orígenes. 
-    // Al NO poner 'allow-top-navigation', el iframe no puede cambiar la URL de tu app.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
-    nuevoIframe.src = urlFinal; 
+            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+    // RE-ACTIVAMOS allow-popups:
+    // Esto hace que el servidor vea que "puede" mostrar publicidad y suelte el video.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
+    
+    nuevoIframe.src = urlFinal;
+    console.log("Modo compatible activado: Esperando video...");
 }
 
             nuevoIframe.src = urlFinal;
