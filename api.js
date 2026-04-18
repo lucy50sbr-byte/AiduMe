@@ -1487,7 +1487,33 @@ if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
     // BLOQUEO DE NIVEL 5: 
     // Quitamos 'allow-top-navigation' y 'allow-top-navigation-by-user-activation'
     // Al quitar estos dos, el iframe TIENE PROHIBIDO cambiar la URL de tu app.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
+    // Sandbox equilibrado: permitimos scripts para que cargue el reproductor
+    // pero NO permitimos 'allow-top-navigation' para que no pueda poner la pantalla blanca.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
+    
+    // CREAMOS UN BOTÓN DE INICIO MANUAL (Solo para Mp4Upload)
+    const btnPlayMp4 = document.createElement('button');
+    btnPlayMp4.id = 'btn-play-extra';
+    btnPlayMp4.innerHTML = "▶ CARGAR SERVIDOR MP4";
+    btnPlayMp4.style.cssText = `
+        display: block; width: 100%; margin-top: 10px; padding: 12px;
+        background-color: #ffc107; color: #000; font-weight: bold;
+        border: none; border-radius: 8px; cursor: pointer;
+    `;
+
+    btnPlayMp4.onclick = () => {
+        // Al tocar el botón, recién ahí le damos la URL al iframe
+        // Agregamos autoplay=1 para que intente arrancar solo
+        const urlConAutoplay = urlFinal.includes('?') ? `${urlFinal}&autoplay=1` : `${urlFinal}?autoplay=1`;
+        nuevoIframe.src = urlConAutoplay;
+        btnPlayMp4.innerHTML = "⌛ Conectando...";
+        btnPlayMp4.style.opacity = "0.5";
+    };
+
+    container.parentNode.insertBefore(btnPlayMp4, container.nextSibling);
+    
+    // Dejamos el iframe sin SRC inicialmente para que no dispare anuncios al cargar la página
+    nuevoIframe.src = "about:blank"; 
 }
 
             nuevoIframe.src = urlFinal;
