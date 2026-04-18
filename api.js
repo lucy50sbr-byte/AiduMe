@@ -1466,7 +1466,18 @@ async function reproducirEpisodio(titulo, num) {
             .eq('idioma', idiomaActual)
             .maybeSingle();
 
-        let urlFinal = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
+        // --- LÓGICA DE LIMPIEZA DE IFRAME ---
+        let urlSucia = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
+        let urlFinal = "";
+
+        if (urlSucia.includes("<iframe")) {
+            // Extraemos solo lo que está dentro de src="..."
+            const match = urlSucia.match(/src=["']([^"']+)["']/);
+            urlFinal = (match && match[1]) ? match[1] : urlSucia;
+        } else {
+            urlFinal = urlSucia;
+        }
+        // ------------------------------------
         
         if (!urlFinal) {
             const sufijo = idiomaActual === 'lat' ? "latino" : "sub español";
@@ -1483,13 +1494,11 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('frameborder', '0');
             
             if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // RE-ACTIVAMOS allow-popups:
-    // Esto hace que el servidor vea que "puede" mostrar publicidad y suelte el video.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
-    
-    nuevoIframe.src = urlFinal;
-    console.log("Modo compatible activado: Esperando video...");
-}
+                // MODO COMPATIBLE: Activamos popups para que el servidor suelte el video.
+                // Tu código Java en Android Studio se encargará de que no se abran realmente.
+                nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
+                console.log("Modo compatible activado: Esperando video...");
+            }
 
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
