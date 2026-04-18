@@ -376,40 +376,57 @@ function updateGlobalUI(id, stars = 0) {
 
 async function cargarDuelo() {
     if (!currentUser) return; 
-    // Se eliminó la llamada a actualizarCronometro() que causaba el error
+
     try {
-        const r = await fetch('https://api.jikan.moe/v4/top/anime?limit=25');
+        // 1. Crear Semilla basada en la fecha (Ej: 20260418)
+        const hoy = new Date();
+        const fechaSemilla = hoy.getFullYear() * 10000 + (hoy.getMonth() + 1) * 100 + hoy.getDate();
+        
+        // 2. Elegir una página aleatoria (entre 1 y 50) que solo cambie cada día
+        const paginaDia = (fechaSemilla % 50) + 1;
+
+        // 3. Pedir animes de esa página específica (Variedad real)
+        const r = await fetch(`https://api.jikan.moe/v4/anime?page=${paginaDia}&limit=25&order_by=score&sort=desc`);
         const j = await r.json();
-        const hoy = new Date().getDate();
         
-        // Rotación diaria basada en el día del mes
-        const s = j.data.sort((a, b) => (a.mal_id * hoy) % 10 - (b.mal_id * hoy) % 10);
+        if (!j.data || j.data.length < 2) {
+            // Si la página falla, intentamos con el top por defecto como respaldo
+            const backup = await fetch('https://api.jikan.moe/v4/top/anime?limit=25');
+            const jBackup = await backup.json();
+            j.data = jBackup.data;
+        }
+
+        // 4. Rotación diaria: Mezclamos y elegimos dos animes basados en la fecha
+        // Usamos la semilla para que durante todo el día salgan los mismos dos
+        const s = j.data.sort((a, b) => (a.mal_id * fechaSemilla) % 10 - (b.mal_id * fechaSemilla) % 10);
         duelAnimes = [s[0], s[1]]; 
-        
+
+        // 5. Actualizar la Interfaz (UI)
         const img1 = document.getElementById('img1');
         const img2 = document.getElementById('img2');
         const t1 = document.getElementById('t1');
         const t2 = document.getElementById('t2');
 
         if (img1 && img2) {
-            img1.src = duelAnimes[0].images.jpg.image_url;
-            img2.src = duelAnimes[1].images.jpg.image_url;
-            t1.innerText = duelAnimes[0].title.substring(0,12);
-            t2.innerText = duelAnimes[1].title.substring(0,12);
+            img1.src = duelAnimes[0].images.jpg.large_image_url || duelAnimes[0].images.jpg.image_url;
+            img2.src = duelAnimes[1].images.jpg.large_image_url || duelAnimes[1].images.jpg.image_url;
             
-            // Actualizar el estado visual del cargando
+            // Usamos un substring un poco más largo (15) para que se entienda el nombre
+            t1.innerText = duelAnimes[0].title.substring(0, 15) + "...";
+            t2.innerText = duelAnimes[1].title.substring(0, 15) + "...";
+            
             const timer = document.getElementById('battle-timer');
             if (timer) timer.innerText = "¡VOTA POR TU FAVORITO!";
         }
 
-        // Cargamos los votos reales de la base de datos
+        // 6. Base de datos: Cargamos los votos reales
         await actualizarMarcadorGlobal();
         await actualizarVotosUI(); 
+
     } catch(e) { 
         console.log("Error duelo", e); 
-        if (document.getElementById('battle-timer')) {
-            document.getElementById('battle-timer').innerText = "Error al cargar";
-        }
+        const timer = document.getElementById('battle-timer');
+        if (timer) timer.innerText = "Error al cargar";
     }
 }
 
