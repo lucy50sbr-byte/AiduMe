@@ -21,14 +21,14 @@ header {
 
 /* Logo con tamaño masivo (360px) */
 .main-logo-hero {
-    height: 360px; /* <--- Subimos de 180px a 360px */
+    height: 180px; /* Lo bajamos de 360px a 180px */
     width: auto; 
-    max-width: 98%; 
+    max-width: 85%; /* Evita que toque los bordes laterales */
     object-fit: contain;
-    filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.4)); /* Brillo más intenso para el tamaño */
+    filter: drop-shadow(0 0 15px rgba(255, 215, 0, 0.4));
     display: block;
     margin: 0 auto;
-    transition: height 0.3s ease; /* Para que el cambio se sienta fluido */
+    transition: height 0.3s ease; /* Por si luego quieres que cambie suavemente */
 }
 
 #app-content {
