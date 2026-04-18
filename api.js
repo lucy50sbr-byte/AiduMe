@@ -1488,9 +1488,6 @@ if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
     // Quitamos 'allow-top-navigation' y 'allow-top-navigation-by-user-activation'
     // Al quitar estos dos, el iframe TIENE PROHIBIDO cambiar la URL de tu app.
     nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
-    
-    // Si el video no arranca al tocarlo, es porque el servidor exige navegación.
-    // Pero es preferible que el usuario tenga que darle 2 veces al play a que salga la pantalla blanca.
 }
 
             nuevoIframe.src = urlFinal;
