@@ -1483,14 +1483,12 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('frameborder', '0');
             
             // ... dentro de reproducirEpisodio en api.js ...
-if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // BLOQUEO DE NIVEL 5: 
-    // Quitamos 'allow-top-navigation' y 'allow-top-navigation-by-user-activation'
-    // Al quitar estos dos, el iframe TIENE PROHIBIDO cambiar la URL de tu app.
-    // Sandbox equilibrado: permitimos scripts para que cargue el reproductor
-    // pero NO permitimos 'allow-top-navigation' para que no pueda poner la pantalla blanca.
+if (urlFinal.includes("mp4upload")) {
+    // Solo permitimos scripts y mismos orígenes. 
+    // Al NO poner 'allow-top-navigation', el iframe no puede cambiar la URL de tu app.
     nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
-    nuevoIframe.src = urlFinal; // Cargamos la URL directamente
+    nuevoIframe.src = urlFinal; 
+
 
     // CREAMOS UN BOTÓN DE INICIO MANUAL (Solo para Mp4Upload)
     const btnPlayMp4 = document.createElement('button');
