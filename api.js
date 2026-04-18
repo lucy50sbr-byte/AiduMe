@@ -1484,12 +1484,10 @@ async function reproducirEpisodio(titulo, num) {
             
             // ... dentro de reproducirEpisodio en api.js ...
 if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // Escudo Calibrado: 
-    // 1. QUITAMOS 'allow-popups' para que el anuncio del casino no pueda nacer.
-    // 2. AGREGAMOS 'allow-top-navigation-by-user-activation' para que el video no se quede en "imagen rota".
+    // Quitamos allow-popups (para el casino)
+    // Quitamos allow-top-navigation (para la pantalla blanca)
+    // Dejamos allow-top-navigation-by-user-activation (para que el video cargue)
     nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation-by-user-activation");
-    
-    console.log("Escudo Anti-Casino activado: Popups bloqueados.");
 }
 
             nuevoIframe.src = urlFinal;
