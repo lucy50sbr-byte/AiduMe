@@ -1484,10 +1484,13 @@ async function reproducirEpisodio(titulo, num) {
             
             // ... dentro de reproducirEpisodio en api.js ...
 if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
-    // Quitamos allow-popups (para el casino)
-    // Quitamos allow-top-navigation (para la pantalla blanca)
-    // Dejamos allow-top-navigation-by-user-activation (para que el video cargue)
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation-by-user-activation");
+    // BLOQUEO DE NIVEL 5: 
+    // Quitamos 'allow-top-navigation' y 'allow-top-navigation-by-user-activation'
+    // Al quitar estos dos, el iframe TIENE PROHIBIDO cambiar la URL de tu app.
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
+    
+    // Si el video no arranca al tocarlo, es porque el servidor exige navegación.
+    // Pero es preferible que el usuario tenga que darle 2 veces al play a que salga la pantalla blanca.
 }
 
             nuevoIframe.src = urlFinal;
