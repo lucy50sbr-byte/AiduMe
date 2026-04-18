@@ -22,12 +22,11 @@ async function cargarHome() {
 
 async function showDetails(a) {
     // --- 0. RESET Y LIMPIEZA DEL REPRODUCTOR ---
-    // Usamos querySelector para asegurar compatibilidad con la clase .video-iframe-aidume
     const iframePrev = document.querySelector('.video-iframe-aidume') || document.getElementById('video-iframe');
     const videoContainer = document.getElementById('video-player-container');
     const videoInfo = document.getElementById('video-ep-title');
 
-    if (iframePrev) iframePrev.src = ""; // Detiene cualquier video anterior
+    if (iframePrev) iframePrev.src = ""; 
     if (videoContainer) videoContainer.style.display = "none"; 
     if (videoInfo) videoInfo.innerText = ""; 
 
@@ -50,7 +49,7 @@ async function showDetails(a) {
     const titleEs = a.titles ? a.titles.find(t => t.type === 'Spanish')?.title : null;
     const nombreFinal = titleEs || a.title;
 
-    // --- NUEVO: MOSTRAR ID SOLO A DUEÑO/ADMIN ---
+    // --- MOSTRAR ID SOLO A DUEÑO/ADMIN ---
     const titleContainer = document.getElementById('dt-title');
     if (titleContainer) {
         const profileData = JSON.parse(localStorage.getItem('aidume_profile'));
@@ -64,7 +63,7 @@ async function showDetails(a) {
     document.getElementById('details').style.display = "block";
     document.getElementById('dp-img').style.backgroundImage = `url(${a.images.jpg.large_image_url})`;
 
-    // --- 2. GENERADOR DE EPISODIOS CON VIDEO ---
+    // --- 2. GENERADOR DE EPISODIOS CON LÓGICA DE EXTENSIÓN ---
     const gridEps = document.getElementById('grid-episodios');
     const epBadge = document.getElementById('ep-count-badge');
     
@@ -72,30 +71,45 @@ async function showDetails(a) {
     let estaEnEmision = a.status === "Currently Airing";
 
     if (gridEps) {
-        gridEps.innerHTML = "<p style='text-align:center; opacity:0.5; padding:20px;'>Cargando progreso...</p>"; 
+        gridEps.innerHTML = "<p style='text-align:center; opacity:0.5; padding:20px;'>Cargando episodios...</p>"; 
 
         let listaVistos = [];
-        if (currentUser) {
-            try {
+        try {
+            // A. Cargar progreso de vistos
+            if (currentUser) {
                 const { data: vistos } = await _db
                     .from('episodios_vistos')
                     .select('episodio_num')
                     .eq('usuario_nombre', currentUser)
                     .eq('anime_id', a.mal_id);
                 if (vistos) listaVistos = vistos.map(v => v.episodio_num);
-            } catch (err) { console.error("Error cargando progreso:", err); }
-        }
+            }
+
+            // B. LÓGICA DE EXTENSIÓN: Consultar si existen links manuales extras
+            const { data: linksExtra } = await _db
+                .from('enlaces_episodios')
+                .select('episodio_num')
+                .eq('anime_id', a.mal_id);
+            
+            if (linksExtra && linksExtra.length > 0) {
+                const maxLinkManual = Math.max(...linksExtra.map(l => l.episodio_num));
+                // Si el link manual más alto supera lo que dice la API, actualizamos el total
+                if (maxLinkManual > totalEps) {
+                    console.log(`Extensión detectada: ${totalEps} -> ${maxLinkManual}`);
+                    totalEps = maxLinkManual;
+                }
+            }
+        } catch (err) { console.error("Error en Supabase:", err); }
 
         const dibujarBotones = (cantidad) => {
             let html = "";
+            const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
             for (let i = 1; i <= cantidad; i++) {
                 const isChecked = listaVistos.includes(i) ? 'checked' : '';
-                
-                // MEJORA: Se limpia el nombre de comillas para que el onclick no falle
-                // Se asegura que llame a reproducirEpisodio correctamente
                 html += `
                     <div class="episode-row">
-                        <div class="ep-info" onclick="reproducirEpisodio('${nombreFinal.replace(/'/g, "\\'")}', ${i})">
+                        <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                             <span class="play-icon">▶</span>
                             <div>
                                 <div class="ep-name">${nombreFinal}</div>
@@ -115,9 +129,11 @@ async function showDetails(a) {
             if (epBadge) epBadge.innerText = `${cantidad} disponibles`;
         };
 
+        // Decisión de renderizado
         if (totalEps > 0) {
             dibujarBotones(totalEps);
         } else {
+            // Si la API dice 0, intentamos buscar la lista de episodios detallada
             try {
                 const resEp = await fetch(`https://api.jikan.moe/v4/anime/${a.mal_id}/episodes`);
                 const dataEp = await resEp.json();
@@ -154,9 +170,7 @@ async function showDetails(a) {
             const jsonTr = await resTr.json();
             let textoTraducido = jsonTr[0].map(item => item[0]).join("");
             
-            textoTraducido = textoTraducido.replace(/\[Escrito por MAL Rewrite\]/g, "");
-            textoTraducido = textoTraducido.replace(/\[Written by MAL Rewrite\]/g, "");
-            
+            textoTraducido = textoTraducido.replace(/\[Escrito por MAL Rewrite\]/g, "").replace(/\[Written by MAL Rewrite\]/g, "");
             synopsisElem.innerText = textoTraducido.trim();
 
             setTimeout(() => {
@@ -167,7 +181,6 @@ async function showDetails(a) {
                     }
                 }
             }, 150); 
-
         } catch (e) { 
             synopsisElem.innerText = textoParaTraducir.replace(/\[Written by MAL Rewrite\]/g, ""); 
         }
@@ -177,7 +190,7 @@ async function showDetails(a) {
     checkUserRating(a.mal_id); 
     cargarRelaciones(a.mal_id);
     cargarPuntuacionComunidad(a.mal_id);
-    updateListButton();     
+    updateListButton();      
     cargarComentarios(a.mal_id); 
     saveHistory(a); 
 }
