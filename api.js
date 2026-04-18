@@ -1489,8 +1489,9 @@ if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
     // Al quitar estos dos, el iframe TIENE PROHIBIDO cambiar la URL de tu app.
     // Sandbox equilibrado: permitimos scripts para que cargue el reproductor
     // pero NO permitimos 'allow-top-navigation' para que no pueda poner la pantalla blanca.
-    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups");
-    
+    nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts");
+    nuevoIframe.src = urlFinal; // Cargamos la URL directamente
+
     // CREAMOS UN BOTÓN DE INICIO MANUAL (Solo para Mp4Upload)
     const btnPlayMp4 = document.createElement('button');
     btnPlayMp4.id = 'btn-play-extra';
