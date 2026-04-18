@@ -97,22 +97,31 @@
             </div>
         </div>
 
-        <div class="section-header-gold"><h2 class="section-h">Top 10 mas vistos</h2></div>
-        <div class="scroll-wrapper">
-            <div class="horizontal-scroll" id="lista"></div>
-            <button class="scroll-arrow-overlay" onclick="scrollSection('lista')">❯</button>
-        </div>
+        <div id="seccion-top-10">
+    <div class="section-header-gold">
+        <h2 class="section-h">Top 10 mas vistos de la temporada</h2>
+    </div>
+    <div class="scroll-wrapper">
+        <div class="horizontal-scroll" id="lista"></div>
+        <button class="scroll-arrow-overlay" onclick="scrollSection('lista')">❯</button>
+    </div>
+</div>
 
-        <div class="section-header-gold" style="margin-top: 40px;">
-            <h2 class="section-h">Todos los Animes</h2>
-        </div>
-        <div id="lista-todos"></div> 
+<div id="seccion-ultimos-episodios">
+    <div class="section-header-gold" style="margin-top: 30px;">
+        <h2 class="section-h">Últimos episodios agregados</h2>
+    </div>
+    <div class="scroll-wrapper">
+        <div class="horizontal-scroll" id="lista-recientes"></div>
+        <button class="scroll-arrow-overlay" onclick="scrollSection('lista-recientes')">❯</button>
+    </div>
+</div>
 
-        <div id="paginacion-container" style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-top: 30px; padding-bottom: 20px;">
-            <button onclick="cambiarPaginaCompleta(-1)" class="btn-random-gold" id="btn-prev-all" style="width: auto;">❮ Anterior</button>
-            <span id="page-number-all" style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página 1</span>
-            <button onclick="cambiarPaginaCompleta(1)" class="btn-random-gold" id="btn-next-all" style="width: auto;">Siguiente ❯</button>
-        </div>
+<div class="section-header-gold" style="margin-top: 40px;">
+    <h2 class="section-h">Todos los Animes</h2>
+</div>
+<div id="lista-todos"></div>
+
     </div> <div id="mis-listas" class="page">
         <h2 class="section-h">Mis Favoritos</h2>
         <div id="lista-favoritos" class="grid"></div>

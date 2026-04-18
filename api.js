@@ -10,12 +10,14 @@ const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
 async function initApp() {
     await cargarDuelo();
     cargarHome();
+    cargarUltimosEpisodios();
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
 }
 
 async function cargarHome() {
-    const r = await fetch('https://api.jikan.moe/v4/top/anime?limit=12');
+    // Cambia esto en cargarHome() para que sea el Top de la Temporada Actual
+const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=12&order_by=members&sort=desc');
     const j = await r.json();
     renderGrid(j.data, 'lista');
 }
@@ -1053,22 +1055,76 @@ async function aplicarFiltrosAvanzados() {
     }
 }
 
-// Función para el botón de la Lupa (🔍)
-function buscarAnime() {
-    const q = document.getElementById('busqueda').value.trim();
-    if (q.length === 0) return cargarHome();
+let paginaBusqueda = 1; // Variable global para controlar la página de búsqueda
 
-    // Quitamos el límite para que traiga todos los resultados relacionados
-    fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=desc`)
-        .then(r => r.json())
-        .then(j => {
-            if (j.data) {
-                renderGrid(j.data, 'lista');
-            }
-        })
-        .catch(err => console.error("Error en búsqueda manual:", err));
+async function buscarAnimeLive(pagina = 1) {
+    paginaBusqueda = pagina;
+    const q = document.getElementById('busqueda').value.trim();
+    
+    // Referencias a tus elementos
+    const seccionTop10 = document.getElementById('seccion-top-10');
+    const paginacionNormal = document.getElementById('paginacion-container');
+    const titulos = document.querySelectorAll('.section-h');
+    const tituloTodos = titulos[1] ? titulos[1] : null;
+
+    // Si el buscador está vacío, volvemos a la normalidad
+    if (q.length === 0) {
+        if (seccionTop10) seccionTop10.style.display = 'block';
+        if (paginacionNormal) paginacionNormal.style.display = 'flex';
+        if (tituloTodos) tituloTodos.innerText = "Todos los Animes";
+        
+        // Eliminamos los botones de paginación de búsqueda si existen
+        const pBusquedaExistente = document.getElementById('paginacion-busqueda');
+        if (pBusquedaExistente) pBusquedaExistente.remove();
+
+        return cargarHome(); 
+    }
+
+    // --- ESTADO: BUSCANDO ---
+    if (seccionTop10) seccionTop10.style.display = 'none';
+    if (paginacionNormal) paginacionNormal.style.display = 'none';
+    
+    if (tituloTodos) tituloTodos.innerText = `Resultados para: "${q}" (Pág. ${paginaBusqueda})`;
+
+    // Fetch a Jikan: order_by=popularity & sort=asc (para que el #1 sea el primero)
+    try {
+        const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=asc&page=${paginaBusqueda}`);
+        const j = await response.json();
+        
+        if (j.data) {
+            // Renderizamos en tu grilla principal
+            renderGrid(j.data, 'lista-todos');
+            
+            // Creamos o actualizamos los botones de paginación de la búsqueda
+            renderPaginacionBusqueda(j.pagination);
+        }
+    } catch (err) {
+        console.error("Error en búsqueda en vivo:", err);
+    }
 }
 
+// Función auxiliar para renderizar la paginación de resultados
+function renderPaginacionBusqueda(info) {
+    // Eliminamos la paginación de búsqueda anterior si existe
+    let contenedorBusqueda = document.getElementById('paginacion-busqueda');
+    if (contenedorBusqueda) contenedorBusqueda.remove();
+
+    // Solo mostramos paginación si hay más de una página o no estamos en la 1
+    if (!info.has_next_page && paginaBusqueda === 1) return;
+
+    contenedorBusqueda = document.createElement('div');
+    contenedorBusqueda.id = 'paginacion-busqueda';
+    contenedorBusqueda.style = "display: flex; justify-content: center; align-items: center; gap: 20px; margin: 30px 0; padding-bottom: 20px;";
+
+    contenedorBusqueda.innerHTML = `
+        <button onclick="buscarAnimeLive(${paginaBusqueda - 1})" class="btn-random-gold" ${paginaBusqueda === 1 ? 'disabled style="opacity:0.5"' : ''}>❮ Anterior</button>
+        <span style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página ${paginaBusqueda}</span>
+        <button onclick="buscarAnimeLive(${paginaBusqueda + 1})" class="btn-random-gold" ${!info.has_next_page ? 'disabled style="opacity:0.5"' : ''}>Siguiente ❯</button>
+    `;
+
+    // Insertamos la paginación después de la lista de resultados
+    document.getElementById('lista-todos').after(contenedorBusqueda);
+}
 
 // Función para borrar cualquier comentario (Solo Admin)
 async function borrarComentarioAdmin(comentarioId) {
@@ -1784,3 +1840,113 @@ async function aceptarNormasRegistro() {
     cerrarConfirmarNormas();
     await procederConRegistro(); // Llamamos a la lógica final
 }
+
+
+// Carga los últimos episodios lanzados en Japón/Jikan
+async function cargarUltimosEpisodios() {
+    try {
+        const res = await fetch('https://api.jikan.moe/v4/watch/episodes');
+        const json = await res.json();
+        
+        // Tomamos los primeros 12 para que no sea una lista infinita
+        const ultimos = json.data.slice(0, 12);
+        
+        // Mapeamos los datos para que tengan el formato que espera tu función renderGrid
+        // Jikan en este endpoint devuelve 'entry', lo adaptamos:
+        const dataAdaptada = ultimos.map(ep => {
+            return {
+                mal_id: ep.entry.mal_id,
+                title: ep.entry.title,
+                images: ep.entry.images,
+                // Agregamos un badge extra para que se vea el número de episodio
+                episode_number: ep.episodes[0].number 
+            };
+        });
+
+        renderGrid(dataAdaptada, 'lista-recientes', true); // El 'true' es para avisar que es especial
+    } catch (e) {
+        console.error("Error cargando episodios recientes:", e);
+    }
+}
+
+async function buscarAnimeFusion(pagina = 1) {
+    paginaBusqueda = pagina;
+    const q = document.getElementById('busqueda').value.trim();
+    
+    // 1. Referencias a los contenedores principales
+    const seccionTop10 = document.getElementById('seccion-top-10');
+    const seccionRecientes = document.getElementById('seccion-ultimos-episodios');
+    const paginacionNormal = document.getElementById('paginacion-container');
+    const listaTodos = document.getElementById('lista-todos');
+
+    // 2. Referencias precisas a los títulos dentro de sus padres
+    const tituloTop10 = seccionTop10 ? seccionTop10.querySelector('.section-h') : null;
+    const tituloRecientes = seccionRecientes ? seccionRecientes.querySelector('.section-h') : null;
+    
+    // Para el título de "Todos los Animes", buscamos el que está justo antes de 'lista-todos'
+    const tituloTodos = listaTodos ? listaTodos.previousElementSibling.querySelector('.section-h') : null;
+
+    // --- ESTADO: BUSCADOR VACÍO (RESTAURAR TODO) ---
+    if (q.length === 0) {
+        // Mostramos las secciones ocultas
+        if (seccionTop10) seccionTop10.style.display = 'block';
+        if (seccionRecientes) seccionRecientes.style.display = 'block';
+        if (paginacionNormal) paginacionNormal.style.display = 'flex';
+        
+        // Restauramos los textos originales por ID para evitar confusiones
+        if (tituloTop10) tituloTop10.innerText = "Top 10 mas vistos de la temporada";
+        if (tituloRecientes) tituloRecientes.innerText = "Últimos episodios agregados";
+        if (tituloTodos) tituloTodos.innerText = "Todos los Animes";
+        
+        // Limpiamos la paginación de búsqueda
+        const pBusquedaExistente = document.getElementById('paginacion-busqueda');
+        if (pBusquedaExistente) pBusquedaExistente.remove();
+
+        return cargarHome(); 
+    }
+
+    // --- ESTADO: BUSCANDO ---
+    // Ocultamos las secciones de la Home
+    if (seccionTop10) seccionTop10.style.display = 'none';
+    if (seccionRecientes) seccionRecientes.style.display = 'none';
+    if (paginacionNormal) paginacionNormal.style.display = 'none';
+    
+    // Cambiamos solo el título de la lista donde aparecerán los resultados
+    if (tituloTodos) tituloTodos.innerText = `Resultados para: "${q}" (Pág. ${paginaBusqueda})`;
+
+    try {
+        const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=asc&page=${paginaBusqueda}`);
+        const j = await response.json();
+        
+        if (j.data) {
+            renderGrid(j.data, 'lista-todos');
+            renderPaginacionBusqueda(j.pagination);
+        }
+    } catch (err) {
+        console.error("Error en búsqueda:", err);
+    }
+}
+
+// Función auxiliar para los botones de página de la búsqueda
+function renderPaginacionBusqueda(info) {
+    let contenedorBusqueda = document.getElementById('paginacion-busqueda');
+    if (contenedorBusqueda) contenedorBusqueda.remove();
+
+    if (!info.has_next_page && paginaBusqueda === 1) return;
+
+    contenedorBusqueda = document.createElement('div');
+    contenedorBusqueda.id = 'paginacion-busqueda';
+    contenedorBusqueda.style = "display: flex; justify-content: center; align-items: center; gap: 20px; margin: 30px 0; padding-bottom: 20px;";
+
+    contenedorBusqueda.innerHTML = `
+        <button onclick="buscarAnimeFusion(${paginaBusqueda - 1})" class="btn-random-gold" ${paginaBusqueda === 1 ? 'disabled style="opacity:0.5"' : ''}>❮ Anterior</button>
+        <span style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página ${paginaBusqueda}</span>
+        <button onclick="buscarAnimeFusion(${paginaBusqueda + 1})" class="btn-random-gold" ${!info.has_next_page ? 'disabled style="opacity:0.5"' : ''}>Siguiente ❯</button>
+    `;
+
+    document.getElementById('lista-todos').after(contenedorBusqueda);
+}
+
+// Mantener tus disparadores vinculados a la nueva función
+function buscarAnime() { buscarAnimeFusion(); }
+function buscarAnimeLive() { buscarAnimeFusion(); }

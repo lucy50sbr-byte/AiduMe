@@ -1664,3 +1664,16 @@ header {
     padding-bottom: 20px;
 }
 
+.ep-badge-float {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--gold);
+    color: #000;
+    font-weight: bold;
+    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    z-index: 2;
+}
