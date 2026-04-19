@@ -10,42 +10,67 @@ const AVATARES_RANGOS = [
 ];
 
 async function showPage(pId) {
-    // --- NUEVO: Cerramos los detalles y detenemos el video al cambiar de pestaña ---
-    hideDetails(); //
+    // 1. RECARGA NUCLEAR: Si hay un video cargado, refrescamos la web para matar el audio
+    const videoContainer = document.getElementById('video-player-container');
+    const iframeActivo = videoContainer ? videoContainer.querySelector('iframe') : null;
 
-    // 1. Ocultar todas las páginas
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page')); //
+    if (iframeActivo && videoContainer.style.display !== "none") {
+        // Guardamos el destino en el hash de la URL (ej: index.html#historial)
+        window.location.hash = pId;
+        // Recarga total: esto limpia la RAM y detiene el audio del sistema
+        window.location.reload();
+        return; 
+    }
+
+    // 2. Navegación normal (si no hay video activo)
+    hideDetails(); 
+
+    // Ocultar todas las páginas
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page')); 
     
-    // 2. Mostrar la página seleccionada
-    const targetPage = document.getElementById(pId); //
+    // Mostrar la página seleccionada
+    const targetPage = document.getElementById(pId);
     if (targetPage) {
-        targetPage.classList.add('active-page'); //
+        targetPage.classList.add('active-page');
     }
 
     // 3. Lógica de carga según la página
     if (pId === 'home') {
-        cargarHome(); //
+        cargarHome(); 
     } else if (pId === 'admin-panel') { 
-        cargarComentariosAdmin(); //
+        cargarComentariosAdmin(); 
     } else if (pId === 'mis-listas') {
-        // Carga de favoritos desde Supabase
-        cargarListaDesdeSQL('favoritos', 'lista-favoritos', 'fecha_agregado'); //
+        cargarListaDesdeSQL('favoritos', 'lista-favoritos', 'fecha_agregado'); 
     } else if (pId === 'historial') {
-        // Carga de historial desde Supabase
-        cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto'); //
+        cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto'); 
     } else if (pId === 'calendario') {
-        cargarCalendario(); //
+        cargarCalendario(); 
     } else if (pId === 'perfil') {
-        actualizarPerfilDesdeSQL(); //
+        actualizarPerfilDesdeSQL(); 
     }
 
     // 4. Actualizar botones del menú inferior (Dorado/Active)
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); //
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); 
     const activeBtn = Array.from(document.querySelectorAll('.nav-item'))
-        .find(n => n.getAttribute('onclick') && n.getAttribute('onclick').includes(pId)); //
+        .find(n => n.getAttribute('onclick') && n.getAttribute('onclick').includes(pId)); 
     
-    if (activeBtn) activeBtn.classList.add('active'); //
+    if (activeBtn) activeBtn.classList.add('active'); 
 }
+
+// --- ESCUCHADOR DE RECARGA ---
+// Pon esto justo debajo de la función showPage para que la app 
+// abra la pestaña correcta después de refrescarse por el video.
+window.addEventListener('load', () => {
+    const hashDestino = window.location.hash.replace('#', '');
+    if (hashDestino) {
+        // Esperamos un momento a que el DOM y Supabase estén listos
+        setTimeout(() => {
+            showPage(hashDestino);
+            // Limpiamos la URL para que no recargue en el futuro innecesariamente
+            window.history.replaceState(null, null, ' ');
+        }, 100);
+    }
+});
 
 // Agregamos el parámetro 'nombreAMostrar' que por defecto es el usuario actual
 async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
@@ -446,19 +471,44 @@ function hideDetails() {
     const videoContainer = document.getElementById('video-player-container');
     const videoInfo = document.getElementById('video-ep-title');
 
-    // 1. Ocultamos el panel de detalles
+    // 1. Ocultar el panel visual
     if (details) details.style.display = "none";
     
-    // 2. FUSIÓN: En lugar de buscar el iframe y limpiar el src, 
-    // vaciamos el contenedor por completo. 
-    // Al hacer innerHTML = "", el iframe (y su audio) dejan de existir al instante.
+    // 2. DESTRUCCIÓN TOTAL DEL REPRODUCTOR
     if (videoContainer) {
+        // Buscamos todos los iframes (por si quedó más de uno)
+        const iframes = videoContainer.querySelectorAll('iframe');
+        
+        iframes.forEach(iframe => {
+            // Paso A: Cortar la comunicación con el servidor de video
+            iframe.src = "about:blank"; 
+            
+            // Paso B: Limpiar el contenido interno (si el navegador lo permite)
+            try {
+                iframe.contentWindow.document.write('');
+                iframe.contentWindow.close();
+            } catch (e) {
+                // Silenciamos errores de seguridad (Cross-Origin)
+            }
+
+            // Paso C: Eliminarlo físicamente del DOM
+            iframe.remove();
+        });
+
+        // Paso D: Vaciar el contenedor y forzar su desaparición
         videoContainer.innerHTML = ""; 
         videoContainer.style.display = "none";
     }
 
-    // 3. Limpiamos el título para que no aparezca el anterior al abrir otro anime
+    // 3. Limpieza de interfaz
     if (videoInfo) videoInfo.innerText = "";
+
+    // 4. TRUCO FINAL: Forzar el foco fuera de cualquier elemento multimedia
+    // Esto le dice al sistema operativo (Android/iOS) que la web ya no está "reproduciendo"
+    const tmp = document.createElement('input');
+    document.body.appendChild(tmp);
+    tmp.focus();
+    document.body.removeChild(tmp);
 }
 
 async function verPerfilAjeno(nombreUsuario) {
