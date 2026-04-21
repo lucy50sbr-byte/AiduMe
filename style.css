@@ -1678,3 +1678,49 @@ header {
     z-index: 2;
 }
 
+/* Contenedor del poster para que la etiqueta no se salga */
+.anime-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px;
+}
+
+/* Asegura que la card sea el punto de referencia para la etiqueta */
+.card {
+    position: relative;
+    overflow: hidden; /* Esto corta la etiqueta para que no sobresalga */
+    border-radius: 12px;
+}
+
+/* Estilo base de la etiqueta (Ribbon) */
+.status-tag {
+    position: absolute;
+    top: 8px;
+    right: -28px; /* La movemos a la derecha */
+    padding: 2px 30px;
+    font-size: 0.65rem;
+    font-weight: bold;
+    color: white;
+    text-transform: uppercase;
+    transform: rotate(45deg); /* La inclinamos */
+    z-index: 5;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Color Verde para Emisión */
+.status-tag.emision {
+    background: #2ecc71; /* Verde esmeralda */
+    border-bottom: 1px solid rgba(255,255,255,0.3);
+}
+
+/* Color Rojo para Finalizado */
+.status-tag.finalizado {
+    background: #e74c3c; /* Rojo alizarina */
+    border-bottom: 1px solid rgba(255,255,255,0.3);
+}
+
+/* Color Azul para Próximos estrenos */
+.status-tag.proximamente {
+    background: #3498db; /* Azul deportivo */
+    border-bottom: 1px solid rgba(255,255,255,0.3);
+}

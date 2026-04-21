@@ -87,7 +87,7 @@ async function showDetails(a) {
                 if (vistos) listaVistos = vistos.map(v => v.episodio_num);
             }
 
-            // B. LÓGICA DE EXTENSIÓN: Consultar si existen links manuales extras
+            // B. LÓGICA DE EXTENSIÓN
             const { data: linksExtra } = await _db
                 .from('enlaces_episodios')
                 .select('episodio_num')
@@ -95,47 +95,51 @@ async function showDetails(a) {
             
             if (linksExtra && linksExtra.length > 0) {
                 const maxLinkManual = Math.max(...linksExtra.map(l => l.episodio_num));
-                // Si el link manual más alto supera lo que dice la API, actualizamos el total
                 if (maxLinkManual > totalEps) {
-                    console.log(`Extensión detectada: ${totalEps} -> ${maxLinkManual}`);
                     totalEps = maxLinkManual;
                 }
             }
         } catch (err) { console.error("Error en Supabase:", err); }
 
         const dibujarBotones = (cantidad) => {
-            let html = "";
-            const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            
-            for (let i = 1; i <= cantidad; i++) {
-                const isChecked = listaVistos.includes(i) ? 'checked' : '';
-                html += `
-                    <div class="episode-row">
-                        <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
-                            <span class="play-icon">▶</span>
-                            <div>
-                                <div class="ep-name">${nombreFinal}</div>
-                                <div class="ep-num">Episodio ${i}</div>
-                            </div>
-                        </div>
-                        <div class="ep-check-area">
-                            <label class="custom-checkbox">
-                                <input type="checkbox" ${isChecked} onchange="toggleEpisodioVisto(${a.mal_id}, ${i}, this)">
-                                <span class="checkmark"></span>
-                            </label>
-                            <span class="check-text">VISTO</span>
-                        </div>
-                    </div>`;
-            }
-            gridEps.innerHTML = html;
-            if (epBadge) epBadge.innerText = `${cantidad} disponibles`;
-        };
+    let html = "";
+    const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
+    for (let i = 1; i <= cantidad; i++) {
+        const isChecked = listaVistos.includes(i) ? 'checked' : '';
+        html += `
+            <div class="episode-row">
+                <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
+                    <span class="play-icon">▶</span>
+                    <div>
+                        <div class="ep-name">${nombreFinal}</div>
+                        <div class="ep-num">Episodio ${i}</div>
+                    </div>
+                </div>
+                
+                <div class="ep-check-area" style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px; min-width: 100px; justify-content: flex-end;">
+                    
+                    <span onclick="event.stopPropagation(); reportarFalla(${i}, '${nombreLimpio}')" 
+                          style="color: #ff4444; font-weight: bold; cursor: pointer; font-size: 1.3rem; padding: 5px; user-select: none;"
+                          title="Reportar video caído">
+                        !
+                    </span>
 
-        // Decisión de renderizado
+                    <label class="custom-checkbox" style="margin: 0;">
+                        <input type="checkbox" ${isChecked} onchange="toggleEpisodioVisto(${a.mal_id}, ${i}, this)">
+                        <span class="checkmark"></span>
+                    </label>
+                    <span class="check-text" style="margin: 0;">VISTO</span>
+                </div>
+            </div>`;
+    }
+    gridEps.innerHTML = html;
+    if (epBadge) epBadge.innerText = `${cantidad} disponibles`;
+};
+
         if (totalEps > 0) {
             dibujarBotones(totalEps);
         } else {
-            // Si la API dice 0, intentamos buscar la lista de episodios detallada
             try {
                 const resEp = await fetch(`https://api.jikan.moe/v4/anime/${a.mal_id}/episodes`);
                 const dataEp = await resEp.json();
@@ -195,6 +199,65 @@ async function showDetails(a) {
     updateListButton();      
     cargarComentarios(a.mal_id); 
     saveHistory(a); 
+}
+
+async function reportarFalla(numEpisodio, nombreAnime) {
+    // 1. Detectar idioma (tu lógica actual)
+    const botones = Array.from(document.querySelectorAll('button'));
+    const btnLatino = botones.find(b => b.innerText.includes('LATINO'));
+    
+    const esLatinoActivo = btnLatino && (
+        btnLatino.style.background.includes('rgb(255, 193, 7)') || 
+        btnLatino.classList.contains('active') ||
+        window.getComputedStyle(btnLatino).backgroundColor === 'rgb(255, 193, 7)'
+    );
+
+    const idiomaActual = esLatinoActivo ? 'Latino' : 'Subtitulado';
+
+    // --- REEMPLAZO DEL CONFIRM POR GOLD ALERT ---
+    const confirmar = await goldAlert({
+        title: "REPORTAR FALLA",
+        text: `¿Reportar el episodio ${numEpisodio} (${idiomaActual}) de "${nombreAnime}" como caído?`,
+        icon: "🚩",
+        showCancel: true,
+        confirmText: "SÍ, REPORTAR"
+    });
+
+    if (!confirmar) return;
+
+    try {
+        const { error } = await _db
+            .from('reportes_episodios')
+            .insert([{
+                usuario: currentUser,
+                anime_id: currentAnime.mal_id,
+                anime_nombre: nombreAnime,
+                episodio: numEpisodio,
+                idioma: idiomaActual,
+                fecha: new Date().toISOString()
+            }]);
+
+        if (error) throw error;
+
+        // --- REEMPLAZO DEL ALERT DE ÉXITO ---
+        goldAlert({
+            title: "ENVIADO",
+            text: `El reporte del episodio ${numEpisodio} (${idiomaActual}) ha sido enviado. ¡Gracias por ayudar!`,
+            icon: "✔️",
+            confirmText: "GENIAL"
+        });
+
+    } catch (err) {
+        console.error("Error al reportar:", err);
+        
+        // --- REEMPLAZO DEL ALERT DE ERROR ---
+        goldAlert({
+            title: "ERROR",
+            text: "No pudimos enviar el reporte en este momento. Inténtalo más tarde.",
+            icon: "❌",
+            confirmText: "ENTENDIDO"
+        });
+    }
 }
 
 // FUNCIÓN AUXILIAR PARA EL CHECKBOX (Agrégala también en api.js)
@@ -470,7 +533,14 @@ async function actualizarMarcadorGlobal() {
 }
 
 async function votarDuelo(index) {
-    if (!currentUser) return;
+    if (!currentUser) {
+        return goldAlert({ 
+            title: "INICIA SESIÓN", 
+            text: "Debes estar logueado para participar en el torneo.", 
+            icon: "👤" 
+        });
+    }
+
     const semanaActual = getWeekNumber(new Date());
 
     try {
@@ -481,7 +551,15 @@ async function votarDuelo(index) {
             .eq('usuario_nombre', currentUser)
             .eq('semana_voto', semanaActual);
 
-        if (count >= 3) return alert("¡Ya usaste tus 3 votos semanales!");
+        // --- REEMPLAZO DEL ALERT DE LÍMITE ---
+        if (count >= 3) {
+            return goldAlert({
+                title: "LÍMITE ALCANZADO",
+                text: "¡Ya usaste tus 3 votos semanales! Vuelve la próxima semana para seguir apoyando a tus favoritos.",
+                icon: "🚫",
+                confirmText: "ENTENDIDO"
+            });
+        }
 
         // 2. Insertar nuevo voto
         const { error: errInsert } = await _db
@@ -495,12 +573,26 @@ async function votarDuelo(index) {
 
         if (errInsert) throw errInsert;
 
-        alert(`¡Votaste por ${duelAnimes[index].title}!`);
+        // --- REEMPLAZO DEL ALERT DE ÉXITO ---
+        goldAlert({
+            title: "VOTO REGISTRADO",
+            text: `¡Has apoyado a ${duelAnimes[index].title}! Tu voto ha sido sumado al marcador global.`,
+            icon: "🏆",
+            confirmText: "¡A POR LA VICTORIA!"
+        });
+
         await actualizarMarcadorGlobal();
         await actualizarVotosUI();
         
     } catch (err) {
         console.error("Error al votar:", err.message);
+        
+        // --- REEMPLAZO DEL ALERT DE ERROR ---
+        goldAlert({
+            title: "ERROR DE CONEXIÓN",
+            text: "No pudimos registrar tu voto. Por favor, intenta de nuevo.",
+            icon: "❌"
+        });
     }
 }
 
@@ -589,19 +681,19 @@ async function postearComentario() {
     if(!text || !currentAnime || !currentUser) return;
 
     try {
-        // 1. CONSULTAR EL ÚLTIMO COMENTARIO DEL USUARIO EN ESTE ANIME ESPECÍFICO
+        // 1. CONSULTAR EL ÚLTIMO COMENTARIO
         const { data: ultimoComentario, error: errCheck } = await _db
             .from('comentarios')
             .select('fecha')
             .eq('usuario', currentUser)
-            .eq('anime_id', currentAnime.mal_id) // <-- ESTA LÍNEA ES LA CLAVE
+            .eq('anime_id', currentAnime.mal_id)
             .order('fecha', { ascending: false })
             .limit(1)
             .maybeSingle();
 
         if (errCheck) throw errCheck;
 
-        // 2. LÓGICA DE TIEMPO (2 horas)
+        // 2. LÓGICA DE TIEMPO (Antispam)
         if (ultimoComentario) {
             const ahora = new Date();
             const fechaUltimo = new Date(ultimoComentario.fecha);
@@ -612,11 +704,25 @@ async function postearComentario() {
                 const minutosRestantes = Math.ceil((dosHorasMs - diferenciaMs) / (60 * 1000));
                 const horas = Math.floor(minutosRestantes / 60);
                 const mins = minutosRestantes % 60;
-                
-                alert(`⏳ Ya comentaste aquí. Esperá ${horas}h ${mins}min para este anime.`);
-                return;
+
+                // --- REEMPLAZO POR GOLD ALERT (MODO ESPERA) ---
+                return goldAlert({
+                    title: "SISTEMA ANTISPAM",
+                    text: `¡Hola! Para evitar el spam, debes esperar ${horas}h ${mins}min antes de volver a comentar en este anime.`,
+                    icon: "⏳",
+                    confirmText: "ENTENDIDO"
+                });
             }
         }
+
+        // --- OBTENER EL AVATAR ACTUAL DEL PERFIL ---
+        const { data: perfil } = await _db
+            .from('perfiles')
+            .select('avatar_id')
+            .eq('nombre', currentUser)
+            .single();
+
+        const miAvatarId = perfil ? perfil.avatar_id : '1';
 
         // 3. ENVIAR COMENTARIO
         const { error: errInsert } = await _db
@@ -624,17 +730,32 @@ async function postearComentario() {
             .insert([{ 
                 anime_id: currentAnime.mal_id, 
                 usuario: currentUser, 
-                comentario: text 
+                comentario: text,
+                avatar_id: miAvatarId
             }]);
 
         if (errInsert) throw errInsert;
 
         input.value = "";
         cargarComentarios(currentAnime.mal_id);
-        alert("✅ ¡Comentario publicado!");
+
+        // --- REEMPLAZO POR GOLD ALERT (ÉXITO) ---
+        goldAlert({
+            title: "¡LOGRO DESBLOQUEADO!",
+            text: "Tu comentario ha sido publicado con éxito. ¡Gracias por compartir tu opinión!",
+            icon: "💬",
+            confirmText: "GENIAL"
+        });
         
     } catch (err) {
         console.error("Error al comentar:", err.message);
+        
+        // --- REEMPLAZO POR GOLD ALERT (ERROR) ---
+        goldAlert({
+            title: "UPS...",
+            text: "Hubo un error al publicar tu comentario. Revisa tu conexión.",
+            icon: "❌"
+        });
     }
 }
 
@@ -643,7 +764,6 @@ async function cargarComentarios(id) {
     const list = document.getElementById('lista-comentarios');
     if (!list) return; 
     
-    // IMPORTANTE: Esto borra lo que haya quedado de antes para evitar el efecto de "cajas"
     list.innerHTML = ""; 
 
     try {
@@ -662,18 +782,37 @@ async function cargarComentarios(id) {
 
         c.forEach(x => { 
             const d = document.createElement('div'); 
-            // Estilo corregido para que no se vea amontonado
             d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
             
+            const avatarEncontrado = AVATARES_RANGOS.find(av => av.id === String(x.avatar_id));
+            const urlAvatar = avatarEncontrado ? avatarEncontrado.img : "https://api.dicebear.com/7.x/avataaars/svg?seed=User";
+
             d.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="width: 90%;">
-                        <strong style="color:var(--gold); font-size:0.8rem; display:block;">@${x.usuario}</strong>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 10px;">
+                    <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
+                         style="width: 35px; height: 35px; border-radius: 50%; border: 1px solid var(--gold); background: #111; cursor: pointer;">
+                    
+                    <div style="flex: 1;">
+                        <strong class="go-to-profile" data-user="${x.usuario}"
+                                style="color:var(--gold); font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
+                            @${x.usuario}
+                        </strong>
                         <span style="font-size:0.9rem; color: #eee; word-wrap: break-word;">${x.comentario}</span>
                     </div>
+                    
                     <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
                 </div>
             `; 
+
+            // ASIGNACIÓN MANUAL DEL CLICK (Esto no falla)
+            d.querySelectorAll('.go-to-profile').forEach(el => {
+                el.addEventListener('click', () => {
+                    const nick = el.getAttribute('data-user');
+                    console.log("Navegando al perfil de:", nick);
+                    verPerfilAjeno(nick);
+                });
+            });
+
             list.appendChild(d);
         });
 
@@ -769,21 +908,24 @@ async function cargarCalendario() {
     }
 }
 
-function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
+async function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
+    // 1. REEMPLAZO DEL ALERT DE PERMISO
     if (Notification.permission !== "granted") {
-        alert("Debes activar las notificaciones.");
-        return;
+        return goldAlert({
+            title: "NOTIFICACIONES",
+            text: "Para avisarte de los estrenos, debes activar los permisos de notificación en tu navegador.",
+            icon: "🔔",
+            confirmText: "ENTENDIDO"
+        });
     }
 
-    // 1. Configurar la hora de estreno en JST (UTC+9)
+    // --- Lógica de cálculo de tiempo (se mantiene igual) ---
     const [hora, minutos] = horaJST.split(':').map(Number);
     const ahora = new Date();
     
-    // 2. Crear fecha del próximo estreno
     let fechaEstreno = new Date();
-    fechaEstreno.setUTCHours(hora - 9, minutos, 0, 0); // Convertimos JST a UTC
+    fechaEstreno.setUTCHours(hora - 9, minutos, 0, 0); 
 
-    // 3. Ajustar al día de la semana correcto
     const dias = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const objetivo = dias.indexOf(diaSemanaIngles.replace('s', ''));
     let hoy = ahora.getUTCDay();
@@ -791,7 +933,6 @@ function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
     let diasDiferencia = (objetivo - hoy + 7) % 7;
     fechaEstreno.setUTCDate(ahora.getUTCDate() + diasDiferencia);
 
-    // 4. Si la hora ya pasó hoy, programar para la próxima semana
     if (fechaEstreno < ahora) {
         fechaEstreno.setUTCDate(fechaEstreno.getUTCDate() + 7);
     }
@@ -806,9 +947,15 @@ function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
         });
     }, tiempoRestante);
 
-    // Mostrar al usuario su hora local de estreno
+    // --- REEMPLAZO DEL ALERT DE ÉXITO (MÁS ÉPICO) ---
     const horaLocal = fechaEstreno.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    alert(`🔔 Recordatorio fijado: ${titulo} se estrena en tu país a las ${horaLocal}.`);
+    
+    goldAlert({
+        title: "RECORDATORIO FIJADO",
+        text: `¡Listo! Te avisaremos cuando salga "${titulo}". En tu país se estrena a las ${horaLocal}.`,
+        icon: "⏰",
+        confirmText: "¡EXCELENTE!"
+    });
 }
 
 function irAnimeAzar() { fetch('https://api.jikan.moe/v4/random/anime').then(r=>r.json()).then(j=>showDetails(j.data)); }
@@ -937,9 +1084,16 @@ async function cargarRelaciones(id) {
 
 // En api.js
 async function limpiarHistorialUsuario() {
-    if (!currentUser) return; // Si no hay usuario, no hace nada
+    if (!currentUser) return; 
 
-    const confirmar = confirm("¿Estás seguro de que quieres borrar TODO tu historial de vistos? Esta acción no se puede deshacer.");
+    // --- REEMPLAZO DEL CONFIRM POR GOLD ALERT (ADVERTENCIA SERIA) ---
+    const confirmar = await goldAlert({
+        title: "BORRAR HISTORIAL",
+        text: "¿Estás seguro de que quieres borrar TODO tu historial de vistos? Esta acción no se puede deshacer.",
+        icon: "🗑️",
+        showCancel: true,
+        confirmText: "SÍ, BORRAR TODO"
+    });
     
     if (confirmar) {
         try {
@@ -951,16 +1105,28 @@ async function limpiarHistorialUsuario() {
 
             if (error) throw error;
 
-            alert("Tu historial ha sido limpiado correctamente.");
+            // --- REEMPLAZO DEL ALERT POR GOLD ALERT (ÉXITO) ---
+            goldAlert({
+                title: "HISTORIAL LIMPIO",
+                text: "Tu historial ha sido eliminado correctamente de nuestros registros.",
+                icon: "🧹",
+                confirmText: "ENTENDIDO"
+            });
             
-            // Refrescamos la lista en la pantalla para que se vea vacía
+            // Refrescamos la lista en la pantalla
             if (typeof cargarListaDesdeSQL === 'function') {
                 cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto');
             }
 
         } catch (err) {
             console.error("Error al limpiar historial:", err.message);
-            alert("No se pudo limpiar el historial. Intenta de nuevo.");
+            
+            // --- REEMPLAZO DEL ALERT POR GOLD ALERT (ERROR) ---
+            goldAlert({
+                title: "ERROR",
+                text: "No se pudo limpiar el historial. Verifica tu conexión e intenta de nuevo.",
+                icon: "❌"
+            });
         }
     }
 }
@@ -1145,12 +1311,42 @@ function renderPaginacionBusqueda(info) {
 
 // Función para borrar cualquier comentario (Solo Admin)
 async function borrarComentarioAdmin(comentarioId) {
-    if (!confirm("¿Borrar este comentario permanentemente?")) return;
+    // --- REEMPLAZO DEL CONFIRM POR GOLD ALERT ---
+    const confirmar = await goldAlert({
+        title: "ELIMINAR COMENTARIO",
+        text: "¿Estás seguro de que deseas borrar este comentario permanentemente? Esta acción no se puede deshacer.",
+        icon: "🗑️",
+        showCancel: true,
+        confirmText: "SÍ, ELIMINAR"
+    });
+
+    if (!confirmar) return;
     
-    const { error } = await _db.from('comentarios').delete().eq('id', comentarioId);
-    if (!error) {
-        alert("Comentario eliminado");
-        cargarComentariosAdmin(); // Recarga la lista del panel
+    try {
+        const { error } = await _db.from('comentarios').delete().eq('id', comentarioId);
+        
+        if (error) throw error;
+
+        // --- REEMPLAZO DEL ALERT POR GOLD ALERT (ÉXITO) ---
+        goldAlert({
+            title: "ELIMINADO",
+            text: "El comentario ha sido removido de la base de datos con éxito.",
+            icon: "✔️",
+            confirmText: "CONTINUAR"
+        });
+
+        // Recarga la lista del panel
+        if (typeof cargarComentariosAdmin === 'function') {
+            cargarComentariosAdmin(); 
+        }
+
+    } catch (err) {
+        console.error("Error al borrar:", err.message);
+        goldAlert({
+            title: "ERROR",
+            text: "No se pudo eliminar el comentario. Inténtalo de nuevo.",
+            icon: "❌"
+        });
     }
 }
 
@@ -1160,49 +1356,59 @@ async function suspenderUsuarioDinamico() {
     const user = document.getElementById('admin-search-user').value.trim();
     const horasInput = document.getElementById('admin-suspend-hours').value;
     
-    if (!user) return alert("Escribe un nombre de usuario");
-    if (!horasInput || horasInput <= 0) return alert("Indica una cantidad de horas válida");
+    if (!user) return goldAlert({ title: "CAMPOS VACÍOS", text: "Escribe un nombre de usuario para sancionar.", icon: "👤" });
+    if (!horasInput || horasInput <= 0) return goldAlert({ title: "TIEMPO INVÁLIDO", text: "Indica una cantidad de horas válida.", icon: "⏳" });
 
-    // Convertimos el valor del input a número
     const horas = parseFloat(horasInput);
-    
-    // Llamamos a tu función principal de suspensión pasándole las horas del input
     await aplicarSancion(user, horas);
 }
 
 // Función principal de sanción actualizada
 async function aplicarSancion(user, horas) {
     try {
-        // 1. Obtener datos de quien está ejecutando la acción (el moderador)
-        // y del objetivo (el usuario a sancionar)
         const { data: moderador } = await _db.from('perfiles').select('rol').eq('nombre', currentUser).single();
         const { data: objetivo } = await _db.from('perfiles').select('rol').eq('nombre', user).single();
 
-        if (!objetivo) return alert("El usuario objetivo no existe.");
+        if (!objetivo) return goldAlert({ title: "ERROR", text: "El usuario objetivo no existe en la base de datos.", icon: "❌" });
 
         // --- LÓGICA DE PROTECCIÓN DEL DUEÑO ---
         if (objetivo.rol === 'dueño') {
-            // Si el que intenta banear es un Admin, se banea a sí mismo (Karma)
             if (moderador.rol === 'admin') {
                 const fechaKarma = new Date('2099-01-01').toISOString();
                 await _db.from('perfiles').update({ baneado_hasta: fechaKarma }).eq('nombre', currentUser);
                 
-                alert(`⚠️ TRAICIÓN DETECTADA: ${currentUser}, has intentado banear al DUEÑO. Ahora tú estás baneado permanentemente.`);
-                location.reload(); // Cerrar su sesión
+                await goldAlert({ 
+                    title: "TRAICIÓN DETECTADA", 
+                    text: `⚠️ ${currentUser}, has intentado banear al DUEÑO. El sistema ha respondido: Ahora TÚ estás baneado permanentemente.`, 
+                    icon: "⚡",
+                    confirmText: "ACEPTAR MI DESTINO"
+                });
+                location.reload(); 
                 return;
             }
-            
-            // Si eres el Dueño probando el botón, simplemente no te deja auto-banearte
-            return alert("👑 El Dueño es intocable.");
+            return goldAlert({ title: "SISTEMA REAL", text: "👑 El Dueño es intocable.", icon: "👑" });
         }
 
         // --- LÓGICA DE SANCIÓN NORMAL ---
         let fechaBaneo = null;
-        if (horas > 0) {
+        const esPermanente = (horas === 0);
+
+        if (!esPermanente) {
             fechaBaneo = new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
         } else {
-            fechaBaneo = new Date('2099-01-01').toISOString(); // Ban permanente
+            fechaBaneo = new Date('2099-01-01').toISOString(); 
         }
+
+        // Confirmación antes de ejecutar
+        const confirmar = await goldAlert({
+            title: "CONFIRMAR SANCIÓN",
+            text: `¿Estás seguro de que quieres ${esPermanente ? 'BANEAR PERMANENTEMENTE' : 'SUSPENDER'} a @${user}?`,
+            icon: "⚖️",
+            showCancel: true,
+            confirmText: "SÍ, EJECUTAR"
+        });
+
+        if (!confirmar) return;
 
         const { error } = await _db
             .from('perfiles')
@@ -1211,19 +1417,22 @@ async function aplicarSancion(user, horas) {
 
         if (error) throw error;
         
-        const mensaje = horas > 0 ? `suspendido por ${horas}h.` : "baneado permanentemente.";
-        alert(`Usuario ${user} ${mensaje}`);
+        goldAlert({ 
+            title: "SENTENCIA APLICADA", 
+            text: `El usuario @${user} ha sido ${esPermanente ? 'expulsado permanentemente' : 'suspendido por ' + horas + 'h'}.`, 
+            icon: "🔨" 
+        });
         
     } catch (err) {
         console.error("Error al sancionar:", err.message);
-        alert("No se pudo aplicar la sanción.");
+        goldAlert({ title: "ERROR", text: "No se pudo aplicar la sanción correctamente.", icon: "❌" });
     }
 }
 
 // Mantén esta para el botón de Ban Permanente (que envía 0)
 async function suspenderUsuario(horas) {
     const user = document.getElementById('admin-search-user').value.trim();
-    if (!user) return alert("Escribe un nombre");
+    if (!user) return goldAlert({ title: "NOMBRE REQUERIDO", text: "Escribe un nombre para aplicar el ban permanente.", icon: "🔍" });
     await aplicarSancion(user, horas);
 }
 
@@ -1231,144 +1440,235 @@ async function cargarComentariosAdmin() {
     const list = document.getElementById('admin-lista-comentarios');
     if (!list) return;
 
-    list.innerHTML = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Analizando y agrupando reportes...</p>";
+    list.innerHTML = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Analizando y agrupando todos los reportes...</p>";
 
     try {
-        // 1. Traemos todos los reportes crudos de la base de datos
-        const { data: reportesRaw, error } = await _db
-            .from('reportes')
-            .select('*')
-            .order('id', { ascending: false });
+        // 1. TRAEMOS REPORTES DE CHAT/ANIME Y REPORTES DE EPISODIOS
+        const [resReportes, resEpisodios] = await Promise.all([
+            _db.from('reportes').select('*').order('id', { ascending: false }),
+            _db.from('reportes_episodios').select('*').order('fecha', { ascending: false })
+        ]);
 
-        if (error) throw error;
+        if (resReportes.error) throw resReportes.error;
+        if (resEpisodios.error) throw resEpisodios.error;
+
         list.innerHTML = "";
 
-        if (!reportesRaw || reportesRaw.length === 0) {
-            list.innerHTML = "<p style='text-align:center; opacity:0.5;'>No hay reportes pendientes.</p>";
-            return;
+        // --- A. RENDERIZADO DE REPORTES DE EPISODIOS (VERDES) ---
+        if (resEpisodios.data && resEpisodios.data.length > 0) {
+           resEpisodios.data.forEach(r => {
+    const divEp = document.createElement('div');
+    // LE ASIGNAMOS UN ID ÚNICO AL DIV PARA PODER BORRARLO LUEGO
+    divEp.id = `reporte-verde-${r.id}`; 
+    
+    divEp.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(0, 255, 100, 0.08); border: 1px solid #00ff64;";
+                divEp.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                                <span style="color:#00ff64; font-size:0.7rem; font-weight:900;">⚠️ VIDEO CAÍDO</span>
+                                <span style="background:#00ff64; color:black; font-size:0.6rem; padding:2px 6px; border-radius:4px; font-weight:bold; text-transform: uppercase;">
+                                    ${r.idioma || 'Subtitulado'}
+                                </span>
+                                <span style="color:#fff; font-size:0.8rem; font-weight:bold;">${r.anime_nombre}</span>
+                            </div>
+                            <p style="color:#eee; margin: 3px 0; font-size: 0.9rem;">
+                                Falla detectada en el <strong>Episodio ${r.episodio}</strong>.
+                            </p>
+                            <p style="font-size:0.7rem; opacity:0.5;">Reportado por: @${r.usuario} | ID: ${r.anime_id}</p>
+                        </div>
+                        <button onclick="borrarReporteEpisodio(${r.id})" title="Marcar como arreglado"
+                                style="background:rgba(0, 255, 100, 0.2); border:1px solid #00ff64; color:white; border-radius:8px; padding:10px; cursor:pointer; font-size:1.1rem;">
+                            ✔️
+                        </button>
+                    </div>`;
+                list.appendChild(divEp);
+            });
         }
 
-        // --- 2. LÓGICA DE AGRUPACIÓN (BASE DE ORO) ---
-        const grupos = {};
+        // --- B. LÓGICA DE AGRUPACIÓN PARA CHAT Y COMENTARIOS ---
+        if (resReportes.data && resReportes.data.length > 0) {
+            const grupos = {};
+            for (const r of resReportes.data) {
+                const esChat = (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
+                const llaveGrupo = esChat ? r.motivo : `anime_${r.comentario_id}`;
 
-        for (const r of reportesRaw) {
-            const esChat = (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
-            
-            // Agrupamos por motivo en chat o ID de comentario en anime
-            const llaveGrupo = esChat ? r.motivo : `anime_${r.comentario_id}`;
-
-            if (!grupos[llaveGrupo]) {
-                grupos[llaveGrupo] = {
-                    infoBase: r,
-                    denunciantes: [r.usuario_reporta],
-                    cantidad: 1,
-                    esChat: esChat,
-                    idsParaBorrar: [r.id]
-                };
-            } else {
-                grupos[llaveGrupo].cantidad++;
-                if (!grupos[llaveGrupo].denunciantes.includes(r.usuario_reporta)) {
-                    grupos[llaveGrupo].denunciantes.push(r.usuario_reporta);
-                }
-                grupos[llaveGrupo].idsParaBorrar.push(r.id);
-            }
-        }
-
-        // --- 3. RENDERIZADO DE GRUPOS ---
-        for (const key in grupos) {
-            const grupo = grupos[key];
-            const r = grupo.infoBase;
-            
-            let usuarioObjetivo = "Usuario Desconocido";
-            let textoReportado = "Mensaje en vivo";
-
-            // --- EXTRACCIÓN DINÁMICA DE DATOS ---
-            if (grupo.esChat) {
-                // 1. Extraer el nombre del denunciado (entre paréntesis)
-                const matchUser = r.motivo.match(/\(Usuario:\s*([^)]+)\)/);
-                usuarioObjetivo = matchUser ? `@${matchUser[1].trim()}` : "Usuario del Chat";
-
-                // 2. Extraer el MENSAJE REAL (lo que está entre comillas después de 'Mensaje:')
-                const matchMsj = r.motivo.match(/Mensaje:\s*"([^"]+)"/);
-                textoReportado = matchMsj ? `"${matchMsj[1]}"` : "Mensaje original no capturado";
-            } else if (r.comentario_id) {
-                // Para animes buscamos los datos en la tabla de comentarios
-                const { data: comData } = await _db
-                    .from('comentarios')
-                    .select('usuario, comentario')
-                    .eq('id', r.comentario_id)
-                    .maybeSingle();
-                
-                if (comData) {
-                    usuarioObjetivo = `@${comData.usuario}`;
-                    textoReportado = `"${comData.comentario}"`;
+                if (!grupos[llaveGrupo]) {
+                    grupos[llaveGrupo] = {
+                        infoBase: r,
+                        denunciantes: [r.usuario_reporta],
+                        cantidad: 1,
+                        esChat: esChat,
+                        idsParaBorrar: [r.id]
+                    };
                 } else {
-                    textoReportado = "Comentario ya eliminado";
+                    grupos[llaveGrupo].cantidad++;
+                    if (!grupos[llaveGrupo].denunciantes.includes(r.usuario_reporta)) {
+                        grupos[llaveGrupo].denunciantes.push(r.usuario_reporta);
+                    }
+                    grupos[llaveGrupo].idsParaBorrar.push(r.id);
                 }
             }
 
-            const d = document.createElement('div');
-            d.className = "config-item-pro";
-            
-            // Colores según tipo de reporte
-            if (grupo.esChat) {
-                d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(128, 0, 128, 0.15); border: 1px solid #a020f0;";
-            } else {
-                d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(229, 9, 20, 0.12); border: 1px solid #e50914;";
+            for (const key in grupos) {
+                const grupo = grupos[key];
+                const r = grupo.infoBase;
+                let usuarioObjetivo = "Usuario Desconocido";
+                let textoReportado = "Mensaje en vivo";
+
+                if (grupo.esChat) {
+                    const matchUser = r.motivo.match(/\(Usuario:\s*([^)]+)\)/);
+                    usuarioObjetivo = matchUser ? `@${matchUser[1].trim()}` : "Usuario del Chat";
+                    const matchMsj = r.motivo.match(/Mensaje:\s*"([^"]+)"/);
+                    textoReportado = matchMsj ? `"${matchMsj[1]}"` : "Mensaje original no capturado";
+                } else if (r.comentario_id) {
+                    const { data: comData } = await _db.from('comentarios').select('usuario, comentario').eq('id', r.comentario_id).maybeSingle();
+                    if (comData) {
+                        usuarioObjetivo = `@${comData.usuario}`;
+                        textoReportado = `"${comData.comentario}"`;
+                    } else {
+                        textoReportado = "Comentario ya eliminado";
+                    }
+                }
+
+                const d = document.createElement('div');
+                if (grupo.esChat) {
+                    d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(128, 0, 128, 0.15); border: 1px solid #a020f0;";
+                } else {
+                    d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(229, 9, 20, 0.12); border: 1px solid #e50914;";
+                }
+
+                const motivoLimpio = r.motivo.replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:').replace(/Motivo:\s*/, '').replace(/\| Mensaje:\s*"[^"]*"/, '').replace(/\(Usuario:\s*[^)]+\)/g, '').trim();
+                const listaDenunciantes = grupo.denunciantes.map(u => `@${u}`).join(', ');
+
+                d.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                                <span style="color:var(--gold); font-size:0.7rem; font-weight:900;">
+                                    ${grupo.esChat ? '💜 REPORTE DE CHAT' : '🚨 REPORTE DE ANIME'} (${grupo.cantidad})
+                                </span>
+                                <span style="color:rgba(255,255,255,0.4); font-size:0.7rem;">|</span>
+                                <span style="color:#fff; font-size:0.75rem; font-weight:bold;">${usuarioObjetivo}</span>
+                            </div>
+                            <p style="color:#eee; margin: 5px 0; font-size: 0.9rem; font-style: italic; opacity:0.8;">
+                                ${textoReportado}
+                            </p>
+                            <div style="margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.75rem;">
+                                <strong style="color:var(--gold);">Denunciantes:</strong> ${listaDenunciantes}<br>
+                                <strong style="color:var(--gold);">Último motivo:</strong> ${motivoLimpio || 'Sin descripción adicional'}
+                            </div>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:5px;">
+                            <button onclick="borrarGrupoReportes([${grupo.idsParaBorrar}])" title="Marcar como revisado"
+                                    style="background:rgba(255,255,255,0.1); border:1px solid #666; color:white; border-radius:8px; padding:8px; cursor:pointer;">✔️</button>
+                            ${!grupo.esChat ? `<button onclick="borrarComentarioAdmin(${r.comentario_id})" style="background:rgba(255,68,68,0.1); border:1px solid #ff4444; color:#ff4444; border-radius:8px; padding:8px; cursor:pointer;">🗑️</button>` : ''}
+                        </div>
+                    </div>`;
+                list.appendChild(d);
             }
-
-            // Limpieza visual del motivo (quitamos etiquetas técnicas y el nombre repetido)
-            const motivoLimpio = r.motivo
-                .replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:')
-                .replace(/Motivo:\s*/, '')
-                .replace(/\| Mensaje:\s*"[^"]*"/, '')
-                .replace(/\(Usuario:\s*[^)]+\)/g, '')
-                .trim();
-
-            const listaDenunciantes = grupo.denunciantes.map(u => `@${u}`).join(', ');
-
-            d.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-                    <div style="flex: 1;">
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                            <span style="color:var(--gold); font-size:0.7rem; font-weight:900;">
-                                ${grupo.esChat ? '💜 REPORTE DE CHAT' : '🚨 REPORTE DE ANIME'} (${grupo.cantidad})
-                            </span>
-                            <span style="color:rgba(255,255,255,0.4); font-size:0.7rem;">|</span>
-                            <span style="color:#fff; font-size:0.75rem; font-weight:bold;">${usuarioObjetivo}</span>
-                        </div>
-                        <p style="color:#eee; margin: 5px 0; font-size: 0.9rem; font-style: italic; opacity:0.8;">
-                            ${textoReportado}
-                        </p>
-                        <div style="margin-top: 10px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.75rem;">
-                            <strong style="color:var(--gold);">Denunciantes:</strong> ${listaDenunciantes}<br>
-                            <strong style="color:var(--gold);">Último motivo:</strong> ${motivoLimpio || 'Sin descripción adicional'}
-                        </div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:5px;">
-                        <button onclick="borrarGrupoReportes([${grupo.idsParaBorrar}])" title="Marcar grupo como revisado"
-                                style="background:rgba(255,255,255,0.1); border:1px solid #666; color:white; border-radius:8px; padding:8px; cursor:pointer;">✔️</button>
-                        
-                        ${!grupo.esChat ? `
-                        <button onclick="borrarComentarioAdmin(${r.comentario_id})" title="Borrar Comentario de Anime"
-                                style="background:rgba(255,68,68,0.1); border:1px solid #ff4444; color:#ff4444; border-radius:8px; padding:8px; cursor:pointer;">🗑️</button>` : ''}
-                    </div>
-                </div>`;
-            list.appendChild(d);
         }
+
+        if (list.innerHTML === "") {
+            list.innerHTML = "<p style='text-align:center; opacity:0.5;'>No hay reportes de ningún tipo.</p>";
+        }
+
     } catch (err) {
         console.error("Error Admin:", err.message);
-        list.innerHTML = `<p style='color:red; text-align:center;'>Error al agrupar reportes: ${err.message}</p>`;
+        list.innerHTML = `<p style='color:red; text-align:center;'>Error al cargar el panel: ${err.message}</p>`;
     }
 }
 
-// Nueva función para borrar el grupo completo de una vez
+/*async function borrarReporteEpisodio(id) {
+    console.log("Intentando borrar el reporte ID:", id);
+    
+    try {
+        const { error } = await _db
+            .from('reportes_episodios')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            alert("Error de Supabase: " + error.message);
+            console.error(error);
+            return;
+        }
+
+        alert("¡Reporte borrado de la base de datos!");
+        
+        // Esto vuelve a ejecutar la función que limpia la lista y la redibuja
+        await cargarComentariosAdmin(); 
+
+    } catch (err) {
+        alert("Error crítico: " + err.message);
+    }
+}*/
+
+window.borrarReporteEpisodio = async function(id) {
+    // CAMBIO AQUÍ: Usamos el nuevo cartel Gold
+    const confirmar = await goldAlert({
+        title: "CONFIRMAR",
+        text: "¿Estás seguro de marcar este reporte como arreglado?",
+        icon: "❓",
+        showCancel: true,
+        confirmText: "SÍ, BORRAR"
+    });
+
+    if (!confirmar) return;
+
+    try {
+        const { error } = await _db.from('reportes_episodios').delete().eq('id', id);
+        if (!error) {
+            // Aviso de éxito con estilo gold
+            goldAlert({ title: "ÉXITO", text: "¡Reporte borrado correctamente!", icon: "✔️" });
+            cargarComentariosAdmin();
+        }
+    } catch (e) { console.error(e); }
+};
+
+// Asegúrate de que sea global si usas type="module"
+window.borrarGrupoReportes = async function(ids) {
+    // 1. Log de control
+    console.log("Intentando borrar IDs:", ids);
+    
+    // 2. Validación básica
+    if (!ids || ids.length === 0) {
+        console.error("No se pasaron IDs para borrar.");
+        return;
+    }
+
+    try {
+        const { error } = await _db
+            .from('reportes')
+            .delete()
+            .in('id', ids);
+
+        if (error) {
+            // Si Supabase devuelve error, lo mostramos
+            console.error("Error de Supabase:", error.message);
+            alert("Error al borrar: " + error.message);
+            return;
+        }
+
+        // 3. Feedback visual de éxito
+        console.log("Borrado exitoso.");
+        
+        // 4. Recarga la lista
+        await cargarComentariosAdmin();
+
+    } catch (err) {
+        // Errores de red o de código
+        console.error("Error crítico en la función:", err);
+    }
+};
+
+/*// Nueva función para borrar el grupo completo de una vez
 async function borrarGrupoReportes(ids) {
     const { error } = await _db.from('reportes').delete().in('id', ids);
     if (!error) {
         cargarComentariosAdmin();
     }
-}
+}*/
 
 // Función auxiliar para el botón Ver más / Ver menos
 function toggleMotivos(btn, id, todos, cortos) {
@@ -1393,19 +1693,27 @@ function contieneOfensa(texto) {
 }
 
 async function reportarComentario(comId) {
-    if (!currentUser) return alert("Inicia sesión para reportar");
+    if (!currentUser) {
+        return goldAlert({ 
+            title: "INICIA SESIÓN", 
+            text: "Debes estar logueado para reportar comentarios.", 
+            icon: "👤" 
+        });
+    }
 
-    // --- NUEVO: ADVERTENCIA PREVIA ---
-    const advertencia = confirm(
-        "⚠️ AVISO DE MODERACIÓN:\n\n" +
-        "Reportar comentarios sin un motivo válido o de forma malintencionada puede resultar en la SUSPENSIÓN de tu cuenta.\n\n" +
-        "¿Estás seguro de que este comentario infringe las normas de AiduMe?"
-    );
+    // 1. --- ADVERTENCIA PREVIA (ESTILO GOLD) ---
+    const advertencia = await goldAlert({
+        title: "AVISO DE MODERACIÓN",
+        text: "Reportar comentarios sin un motivo válido o de forma malintencionada puede resultar en la SUSPENSIÓN de tu cuenta.\n\n¿Estás seguro de que este comentario infringe las normas?",
+        icon: "⚠️",
+        showCancel: true,
+        confirmText: "ESTOY SEGURO"
+    });
 
-    if (!advertencia) return; // Si el usuario cancela, no hacemos nada.
+    if (!advertencia) return;
 
     try {
-        // 1. Verificar si este usuario ya reportó este comentario
+        // 2. Verificar si ya reportó
         const { data: yaReportado, error: errCheck } = await _db
             .from('reportes')
             .select('id')
@@ -1416,21 +1724,35 @@ async function reportarComentario(comId) {
         if (errCheck) throw errCheck;
 
         if (yaReportado) {
-            return alert("Ya has enviado un reporte para este comentario.");
+            return goldAlert({ 
+                title: "REPORTE DUPLICADO", 
+                text: "Ya has enviado un reporte para este comentario anteriormente.", 
+                icon: "📂" 
+            });
         }
 
-        // 2. Pedir el motivo
-        const motivo = prompt(
-    "🛡️ SISTEMA DE MODERACIÓN AIDUME\n" +
-    "Escribe el motivo real del reporte.\n\n" +
-    "NOTA: Si este reporte es falso, tu rango de @"+currentUser+" será revisado para sanción."
-);
+        // 3. --- PEDIR MOTIVO (REEMPLAZO DEL PROMPT) ---
+        const motivo = await goldAlert({
+            title: "SISTEMA DE MODERACIÓN",
+            text: `Escribe el motivo del reporte.\n\n(Tu usuario @${currentUser} quedará vinculado a este reporte).`,
+            icon: "🛡️",
+            showInput: true,
+            showCancel: true,
+            confirmText: "ENVIAR REPORTE"
+        });
         
         if (!motivo || motivo.trim().length < 4) {
-            return alert("Debes proporcionar un motivo válido y descriptivo para proceder.");
+            if (motivo !== null) { // Si no canceló, pero escribió poco
+                goldAlert({ 
+                    title: "MOTIVO INVÁLIDO", 
+                    text: "Debes proporcionar un motivo descriptivo para proceder.", 
+                    icon: "✍️" 
+                });
+            }
+            return;
         }
 
-        // 3. Insertar el reporte en Supabase
+        // 4. Insertar en Supabase
         const { error: errInsert } = await _db.from('reportes').insert([{
             comentario_id: comId,
             usuario_reporta: currentUser,
@@ -1439,14 +1761,19 @@ async function reportarComentario(comId) {
 
         if (errInsert) throw errInsert;
 
-        alert("Reporte recibido. Gracias por ayudar a mantener AiduMe seguro.");
+        // --- ÉXITO ---
+        goldAlert({
+            title: "REPORTE RECIBIDO",
+            text: "Gracias por ayudar a mantener AiduMe seguro. Nuestro equipo revisará el comentario pronto.",
+            icon: "✔️",
+            confirmText: "ENTENDIDO"
+        });
         
-        // Refrescar panel de admin si está abierto
         if (typeof cargarComentariosAdmin === 'function') cargarComentariosAdmin();
 
     } catch (err) {
         console.error("Error al reportar:", err.message);
-        alert("Hubo un error al procesar tu reporte.");
+        goldAlert({ title: "ERROR", text: "No pudimos procesar tu reporte.", icon: "❌" });
     }
 }
 
@@ -1670,19 +1997,25 @@ function capturarIdActual() {
 }
 
 async function guardarLinkEpisodio() {
-    // 1. Capturamos los valores de los inputs del HTML
+    // 1. Capturamos los valores
     const id = document.getElementById('adm-anime-id').value;
     const num = document.getElementById('adm-ep-num').value;
     const idioma = document.getElementById('adm-idioma').value;
     let url = document.getElementById('adm-url').value.trim();
 
-    // 2. Validación: Si falta algo, el botón "no hace nada" visualmente, por eso ponemos alertas
-    if (!id) return alert("❌ Error: Falta el ID del anime. Usa el botón 'Capturar'.");
-    if (!num) return alert("❌ Error: Indica el número de episodio.");
-    if (!url) return alert("❌ Error: Pega la URL del video.");
+    // 2. Validación (Reemplazo de alertas de error)
+    if (!id) {
+        return goldAlert({ title: "FALTA ID", text: "Error: No hay ID de anime. Usa el botón 'Capturar'.", icon: "🆔" });
+    }
+    if (!num) {
+        return goldAlert({ title: "NÚMERO FALTANTE", text: "Error: Indica el número de episodio.", icon: "🔢" });
+    }
+    if (!url) {
+        return goldAlert({ title: "FALTA URL", text: "Error: Pega la URL del video.", icon: "🔗" });
+    }
 
     try {
-        // 3. Enviamos los datos a la tabla 'enlaces_episodios' en Supabase
+        // 3. Enviamos los datos a Supabase
         const { error } = await _db
             .from('enlaces_episodios')
             .upsert({ 
@@ -1694,14 +2027,25 @@ async function guardarLinkEpisodio() {
 
         if (error) throw error;
 
-        // 4. Éxito y limpieza de campos para el siguiente episodio
-        alert("✅ ¡Enlace de Oro guardado con éxito!");
-        document.getElementById('adm-ep-num').value = ""; // Limpia el ep para el siguiente
-        document.getElementById('adm-url').value = "";    // Limpia la URL
+        // 4. ÉXITO (Reemplazo de alerta de éxito)
+        await goldAlert({
+            title: "ENLACE DE ORO",
+            text: `¡Episodio ${num} (${idioma}) guardado con éxito!`,
+            icon: "🏆",
+            confirmText: "SIGUIENTE"
+        });
+
+        // Limpieza de campos
+        document.getElementById('adm-ep-num').value = ""; 
+        document.getElementById('adm-url').value = ""; 
         
     } catch (err) {
         console.error("Error al guardar en Supabase:", err.message);
-        alert("❌ Error al guardar: " + err.message);
+        goldAlert({
+            title: "ERROR DE DB",
+            text: "No se pudo guardar: " + err.message,
+            icon: "❌"
+        });
     }
 }
 
@@ -1810,17 +2154,28 @@ setInterval(() => {
 }, 10000);
 
 async function reportarMensajeChat(msjId, usuarioReportado) {
-    if (!currentUser) return alert("Inicia sesión para reportar");
+    if (!currentUser) {
+        return goldAlert({ title: "INICIA SESIÓN", text: "Necesitas una cuenta para reportar mensajes.", icon: "👤" });
+    }
     
-    // 1. Buscamos el texto del mensaje en la interfaz del chat
-    // Buscamos el elemento que contiene el texto del mensaje reportado
-    const msjRow = document.querySelector(`button[onclick*="${msjId}"]`).closest('.chat-msg-row');
+    // --- PASO CLAVE: CAPTURAR EL TEXTO ANTES DE MOSTRAR EL MODAL ---
+    // Usamos el ID del mensaje para buscarlo en el DOM inmediatamente
+    const msjRow = document.querySelector(`button[onclick*="${msjId}"]`)?.closest('.chat-msg-row');
     const textoMensaje = msjRow ? msjRow.querySelector('.chat-text').innerText : "Mensaje no encontrado";
 
-    const motivoUser = prompt(`🛡️ MODERACIÓN AIDUME\nReportando a @${usuarioReportado}\nEscribe el motivo:`);
+    // Ahora que ya tenemos el texto guardado en la variable 'textoMensaje', 
+    // no importa si el mensaje se borra o se mueve en el chat.
+    
+    const motivoUser = await goldAlert({
+        title: "🛡️ MODERACIÓN AIDUME",
+        text: `Reportando a @${usuarioReportado}. ¿Cuál es el motivo del reporte?`,
+        icon: "💜",
+        showInput: true,
+        showCancel: true,
+        confirmText: "ENVIAR REPORTE"
+    });
     
     if (motivoUser && motivoUser.trim().length > 3) {
-        // 2. Guardamos el mensaje real dentro del motivo con un formato que podamos extraer
         const motivoFinal = `[CHAT_PURPLE] Motivo: ${motivoUser.trim()} | Mensaje: "${textoMensaje}" (Usuario: ${usuarioReportado})`;
 
         const { error } = await _db.from('reportes').insert([{
@@ -1829,7 +2184,15 @@ async function reportarMensajeChat(msjId, usuarioReportado) {
             motivo: motivoFinal 
         }]);
         
-        if (!error) alert("Reporte enviado con el mensaje original.");
+        if (!error) {
+            goldAlert({
+                title: "ENVIADO",
+                text: "Reporte de chat enviado con éxito.",
+                icon: "✔️"
+            });
+        }
+    } else if (motivoUser !== null) {
+        goldAlert({ text: "El motivo es muy corto.", icon: "✍️" });
     }
 }
 
@@ -1963,6 +2326,57 @@ function renderPaginacionBusqueda(info) {
 
     document.getElementById('lista-todos').after(contenedorBusqueda);
 }
+
+window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confirmText = "ACEPTAR", showCancel = false, showInput = false }) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('gold-modal');
+        const input = document.getElementById('gold-modal-input');
+        const titleEl = document.getElementById('gold-modal-title');
+        const textEl = document.getElementById('gold-modal-text');
+        const iconEl = document.getElementById('gold-modal-icon');
+        const btnContainer = document.getElementById('gold-modal-buttons');
+
+        // Configurar contenido
+        titleEl.innerText = title;
+        textEl.innerText = text;
+        iconEl.innerText = icon;
+        btnContainer.innerHTML = ""; // Limpiar botones
+
+        // Configurar Input
+        input.value = "";
+        input.style.display = showInput ? "block" : "none";
+
+        // Botón Confirmar / Enviar
+        const btnConfirm = document.createElement('button');
+        btnConfirm.innerText = confirmText;
+        btnConfirm.style = "background:var(--gold); color:black; border:none; padding:12px 20px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1; transition: 0.2s;";
+        btnConfirm.onclick = () => {
+            const val = showInput ? input.value : true;
+            modal.style.display = 'none';
+            resolve(val);
+        };
+
+        // Botón Cancelar
+        if (showCancel) {
+            const btnCancel = document.createElement('button');
+            btnCancel.innerText = "CANCELAR";
+            btnCancel.style = "background:transparent; color:#fff; border:1px solid #444; padding:12px 20px; border-radius:8px; cursor:pointer; flex:1;";
+            btnCancel.onclick = () => {
+                modal.style.display = 'none';
+                resolve(null); // Devolvemos null si cancela
+            };
+            btnContainer.appendChild(btnCancel);
+        }
+
+        btnContainer.appendChild(btnConfirm);
+        
+        // Mostrar modal con flex
+        modal.style.display = 'flex';
+        
+        // Auto-foco si hay input
+        if(showInput) setTimeout(() => input.focus(), 50);
+    });
+};
 
 // Mantener tus disparadores vinculados a la nueva función
 function buscarAnime() { buscarAnimeFusion(); }

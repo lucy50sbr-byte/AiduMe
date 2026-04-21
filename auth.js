@@ -208,6 +208,30 @@ async function obtenerIP() {
     } catch (e) { return "127.0.0.1"; }
 }
 
+// Configuración
+const CONFIG_ADS = {
+    url: "https://tu-enlace-de-anuncio.com",
+    clicsNecesarios: 2, // El anuncio sale al segundo clic
+    tiempoEspera: 60000 // O esperar 1 minuto entre anuncios (en milisegundos)
+};
+
+function lanzarAnuncio() {
+    // Obtenemos el contador actual del almacenamiento de sesión
+    let clics = parseInt(sessionStorage.getItem('conteoAnuncio')) || 0;
+    clics++;
+
+    if (clics >= CONFIG_ADS.clicsNecesarios) {
+        // Abrimos el anuncio en una pestaña nueva
+        window.open(CONFIG_ADS.url, '_blank');
+        
+        // Reiniciamos el contador
+        sessionStorage.setItem('conteoAnuncio', '0');
+    } else {
+        // Guardamos el nuevo conteo
+        sessionStorage.setItem('conteoAnuncio', clics.toString());
+    }
+}
+
 // Llamar a la función al cargar la web
 window.addEventListener('load', solicitarPermisoNotificaciones);
 

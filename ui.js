@@ -182,12 +182,12 @@ function renderCondecoraciones(cond) {
     container.innerHTML = ""; // Limpiar
 
     const lista = [
-        { tiene: cond.nivel50, img: "1.png", txt: "Medalla del Dragon: Nivel 50 alcanzado" },
-        { tiene: cond.unAnio, img: "2.png", txt: "Escudo de Valkyrias: 1 año en AiduMe" },
-        { tiene: cond.justiciero, img: "3.png", txt: "Emblema León del fuego: 60 comentarios y 30 reportes válidos" },
-        { tiene: cond.pionero, img: "4.png", txt: "Cruz de Honor: De los primeros 100 usuarios" },
-        { tiene: cond.esPremium, img: "5.png", txt: "Corona Real: Miembro Premium de AiduMe" }, // <-- ACTIVADA
-        { tiene: cond.veterano3, img: "6.png", txt: "Orbe Estelar: 3 años de antigüedad" }
+        { tiene: cond.nivel50, img: "1.png", title: "MEDALLA DEL DRAGÓN", txt: "Nivel 50 alcanzado", icon: "🐉" },
+        { tiene: cond.unAnio, img: "2.png", title: "ESCUDO DE VALKYRIAS", txt: "1 año en AiduMe", icon: "🛡️" },
+        { tiene: cond.justiciero, img: "3.png", title: "LEÓN DEL FUEGO", txt: "60 comentarios y 30 reportes válidos", icon: "🔥" },
+        { tiene: cond.pionero, img: "4.png", title: "CRUZ DE HONOR", txt: "De los primeros 100 usuarios", icon: "🎖️" },
+        { tiene: cond.esPremium, img: "5.png", title: "CORONA REAL", txt: "Miembro Premium de AiduMe", icon: "👑" },
+        { tiene: cond.veterano3, img: "6.png", title: "ORBE ESTELAR", txt: "3 años de antigüedad", icon: "🌌" }
     ];
 
     lista.forEach(item => {
@@ -195,8 +195,18 @@ function renderCondecoraciones(cond) {
             const el = document.createElement('img');
             el.src = `insignias/${item.img}`;
             el.className = "condecoracion-img";
-            el.title = item.txt; // Tooltip al pasar el mouse
-            el.onclick = () => alert(item.txt); // Feedback al tocar en móvil
+            el.title = item.txt; 
+            
+            // --- REEMPLAZO DEL ALERT POR GOLD ALERT ---
+            el.onclick = () => {
+                goldAlert({
+                    title: item.title,
+                    text: item.txt,
+                    icon: item.icon,
+                    confirmText: "¡EXCELENTE!"
+                });
+            };
+            
             container.appendChild(el);
         }
     });
@@ -245,6 +255,7 @@ function renderGrid(data, id) {
     const container = document.getElementById(id);
     if (!container) return;
     
+    // Si no hay datos, mostramos un mensaje de vacío
     container.innerHTML = data.length ? "" : "<p style='text-align:center; opacity:0.5; padding:20px;'>No hay resultados.</p>";
     
     data.forEach(a => {
@@ -252,16 +263,28 @@ function renderGrid(data, id) {
         div.className = 'card';
         div.onclick = () => showDetails(a);
         
-        // Buscamos título en español, si no, el original
+        // 1. LÓGICA DE ETIQUETAS DE ESTADO (Airing/Finished/Upcoming)
+        let etiquetaHTML = "";
+        if (a.status === "Currently Airing") {
+            etiquetaHTML = `<div class="status-tag emision">Emisión</div>`;
+        } else if (a.status === "Finished Airing") {
+            etiquetaHTML = `<div class="status-tag finalizado">Finalizado</div>`;
+        } else if (a.status === "Not yet aired" || a.status === "Upcoming") {
+            etiquetaHTML = `<div class="status-tag proximamente">Pronto</div>`;
+        }
+
+        // 2. TÍTULOS: Buscamos en español, si no, usamos el título principal
         const titleEs = a.titles ? a.titles.find(t => t.type === 'Spanish')?.title : null;
         const nombreMostrar = titleEs || a.title || "Sin título";
 
-        // Elegimos imagen según modo ahorro
+        // 3. IMÁGENES: Soporte para modo ahorro de datos (Data Saver)
         const imgUrl = (dataSaver && a.images?.jpg?.small_image_url) 
             ? a.images.jpg.small_image_url 
             : (a.images?.jpg?.image_url || 'placeholder.png');
 
+        // 4. CONSTRUCCIÓN DEL HTML INTERNO
         div.innerHTML = `
+            ${etiquetaHTML}
             <img src="${imgUrl}" loading="lazy" alt="${nombreMostrar}">
             <div class="card-title">${nombreMostrar}</div>
         `;
