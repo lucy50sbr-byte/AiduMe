@@ -65,13 +65,12 @@ async function showDetails(a) {
     document.getElementById('details').style.display = "block";
     document.getElementById('dp-img').style.backgroundImage = `url(${a.images.jpg.large_image_url})`;
 
-    // --- 2. GENERADOR DE EPISODIOS CON LÓGICA DE EXTENSIÓN Y EPISODIO 0 ---
+    // --- 2. GENERADOR DE EPISODIOS CON LÓGICA DE EXTENSIÓN ---
     const gridEps = document.getElementById('grid-episodios');
     const epBadge = document.getElementById('ep-count-badge');
     
     let totalEps = parseInt(a.episodes) || 0;
     let estaEnEmision = a.status === "Currently Airing";
-    let tieneEpisodioCero = false;
 
     if (gridEps) {
         gridEps.innerHTML = "<p style='text-align:center; opacity:0.5; padding:20px;'>Cargando episodios...</p>"; 
@@ -88,17 +87,15 @@ async function showDetails(a) {
                 if (vistos) listaVistos = vistos.map(v => v.episodio_num);
             }
 
-            // B. LÓGICA DE EXTENSIÓN Y DETECCIÓN DE EPISODIO 0
+            // B. LÓGICA DE EXTENSIÓN: Consultar si existen links manuales extras
             const { data: linksExtra } = await _db
                 .from('enlaces_episodios')
                 .select('episodio_num')
                 .eq('anime_id', a.mal_id);
             
             if (linksExtra && linksExtra.length > 0) {
-                // Verificamos si existe el episodio 0 en los links manuales
-                tieneEpisodioCero = linksExtra.some(l => l.episodio_num === 0);
-                
                 const maxLinkManual = Math.max(...linksExtra.map(l => l.episodio_num));
+                // Si el link manual más alto supera lo que dice la API, actualizamos el total
                 if (maxLinkManual > totalEps) {
                     console.log(`Extensión detectada: ${totalEps} -> ${maxLinkManual}`);
                     totalEps = maxLinkManual;
@@ -108,20 +105,17 @@ async function showDetails(a) {
 
         const dibujarBotones = (cantidad) => {
             let html = "";
-            let inicio = tieneEpisodioCero ? 0 : 1;
             const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             
-            for (let i = inicio; i <= cantidad; i++) {
+            for (let i = 1; i <= cantidad; i++) {
                 const isChecked = listaVistos.includes(i) ? 'checked' : '';
-                const textoEpisodio = (i === 0) ? "Especial / Película" : `Episodio ${i}`;
-
                 html += `
                     <div class="episode-row">
                         <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                             <span class="play-icon">▶</span>
                             <div>
                                 <div class="ep-name">${nombreFinal}</div>
-                                <div class="ep-num">${textoEpisodio}</div>
+                                <div class="ep-num">Episodio ${i}</div>
                             </div>
                         </div>
                         <div class="ep-check-area">
@@ -134,14 +128,14 @@ async function showDetails(a) {
                     </div>`;
             }
             gridEps.innerHTML = html;
-            const totalMostrados = tieneEpisodioCero ? (cantidad + 1) : cantidad;
-            if (epBadge) epBadge.innerText = `${totalMostrados} disponibles`;
+            if (epBadge) epBadge.innerText = `${cantidad} disponibles`;
         };
 
-        // DECISIÓN DE RENDERIZADO: Ahora permite entrar si hay totalEps > 0 O si detectamos un ep 0 manual
-        if (totalEps > 0 || tieneEpisodioCero) {
+        // Decisión de renderizado
+        if (totalEps > 0) {
             dibujarBotones(totalEps);
         } else {
+            // Si la API dice 0, intentamos buscar la lista de episodios detallada
             try {
                 const resEp = await fetch(`https://api.jikan.moe/v4/anime/${a.mal_id}/episodes`);
                 const dataEp = await resEp.json();
@@ -1534,10 +1528,6 @@ function cambiarPaginaCompleta(delta) {
 }
 
 async function reproducirEpisodio(titulo, num) {
-    // CAMBIO CLÍTICO: Permitir que 'num' sea 0. 
-    // Usamos (num === undefined || num === null) en lugar de (!num)
-    if (num === undefined || num === null) return;
-
     ultimoEpisodioCargado = { titulo, num };
     const container = document.getElementById('video-player-container');
     const infoText = document.getElementById('video-ep-title');
@@ -1548,39 +1538,39 @@ async function reproducirEpisodio(titulo, num) {
     container.innerHTML = ""; 
     container.style.display = "block";
     
+    // Eliminamos cualquier rastro de botones de intentos anteriores
     const botonViejo = document.getElementById('btn-play-extra');
     if (botonViejo) botonViejo.remove();
 
     try {
-        // Consultamos a Supabase buscando el número exacto (incluyendo el 0)
+        // Consultamos a Supabase
         const { data: enlaceManual } = await _db
             .from('enlaces_episodios')
             .select('url_video')
             .eq('anime_id', currentAnime.mal_id)
-            .eq('episodio_num', num) 
+            .eq('episodio_num', num)
             .eq('idioma', idiomaActual)
             .maybeSingle();
 
+        // --- LÓGICA DE LIMPIEZA DE IFRAME ---
         let urlSucia = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
         let urlFinal = "";
 
-        // Lógica de limpieza de Iframe (para pegar códigos de Embed directamente)
         if (urlSucia.includes("<iframe")) {
+            // Extraemos solo lo que está dentro de src="..."
             const match = urlSucia.match(/src=["']([^"']+)["']/);
             urlFinal = (match && match[1]) ? match[1] : urlSucia;
         } else {
             urlFinal = urlSucia;
         }
+        // ------------------------------------
         
-        // Si no hay link manual en Supabase, buscamos en YouTube (automático)
         if (!urlFinal) {
             const sufijo = idiomaActual === 'lat' ? "latino" : "sub español";
-            // Si el episodio es 0, lo buscamos como "especial" o "0"
-            const termoBusqueda = num === 0 ? "especial 0" : "episodio " + num;
-            urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " " + termoBusqueda + " " + sufijo)}`;
+            urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
-        // 2. CREACIÓN DEL REPRODUCTOR (Optimizado para Android)
+        // 2. CREACIÓN DEL REPRODUCTOR (Esperamos 200ms para asegurar estabilidad en Android)
         setTimeout(() => {
             const nuevoIframe = document.createElement('iframe');
             nuevoIframe.className = "video-iframe-aidume";
@@ -1589,22 +1579,24 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.setAttribute('allowfullscreen', 'true');
             nuevoIframe.setAttribute('frameborder', '0');
             
-            // Compatibilidad con servidores externos que usan popups
-            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload") || urlFinal.includes("ok.ru")) {
+            if (urlFinal.includes("mp4upload") || urlFinal.includes("yourupload")) {
+                // MODO COMPATIBLE: Activamos popups para que el servidor suelte el video.
+                // Tu código Java en Android Studio se encargará de que no se abran realmente.
                 nuevoIframe.setAttribute("sandbox", "allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-popups allow-top-navigation-by-user-activation");
+                console.log("Modo compatible activado: Esperando video...");
             }
 
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
             
+            // Scroll suave al reproductor para centrar la vista
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 200);
 
-        // 4. ACTUALIZAR TÍTULO (Tratamiento especial para el Ep 0)
+        // 4. ACTUALIZAR TÍTULO E IDIOMA
         if (infoText) {
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
-            const textoEpisodio = num === 0 ? "Especial/0" : num;
-            infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${textoEpisodio} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
+            infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
         }
 
     } catch (err) {

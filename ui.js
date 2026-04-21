@@ -10,51 +10,58 @@ const AVATARES_RANGOS = [
 ];
 
 async function showPage(pId) {
-    // 1. RECARGA NUCLEAR: Si hay un video cargado, refrescamos la web para matar el audio
+    // 1. RECARGA NUCLEAR MEJORADA
+    // Si hay un video y cambiamos de página, recargamos para limpiar RAM y audio
     const videoContainer = document.getElementById('video-player-container');
     const iframeActivo = videoContainer ? videoContainer.querySelector('iframe') : null;
 
-    if (iframeActivo && videoContainer.style.display !== "none") {
-        // Guardamos el destino en el hash de la URL (ej: index.html#historial)
+    if (iframeActivo && videoContainer.style.display !== "none" && iframeActivo.src !== "") {
+        // Guardamos el destino para que al recargar sepa a dónde ir
         window.location.hash = pId;
-        // Recarga total: esto limpia la RAM y detiene el audio del sistema
         window.location.reload();
         return; 
     }
 
-    // 2. Navegación normal (si no hay video activo)
-    hideDetails(); 
+    // 2. NAVEGACIÓN NORMAL
+    hideDetails(); // Cerramos cualquier overlay de detalles abierto
 
-    // Ocultar todas las páginas
+    // Ocultar todas las páginas y quitar clases activas
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page')); 
     
     // Mostrar la página seleccionada
     const targetPage = document.getElementById(pId);
     if (targetPage) {
         targetPage.classList.add('active-page');
+        // Aseguramos que el scroll vuelva arriba al cambiar de pestaña
+        window.scrollTo(0, 0);
     }
 
-    // 3. Lógica de carga según la página
-    if (pId === 'home') {
-        cargarHome(); 
-    } else if (pId === 'admin-panel') { 
-        cargarComentariosAdmin(); 
-    } else if (pId === 'mis-listas') {
-        cargarListaDesdeSQL('favoritos', 'lista-favoritos', 'fecha_agregado'); 
-    } else if (pId === 'historial') {
-        cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto'); 
-    } else if (pId === 'calendario') {
-        cargarCalendario(); 
-    } else if (pId === 'perfil') {
-        actualizarPerfilDesdeSQL(); 
+    // 3. LÓGICA DE CARGA SEGÚN LA PÁGINA
+    switch(pId) {
+        case 'home': cargarHome(); break;
+        case 'admin-panel': cargarComentariosAdmin(); break;
+        case 'mis-listas': cargarListaDesdeSQL('favoritos', 'lista-favoritos', 'fecha_agregado'); break;
+        case 'historial': cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto'); break;
+        case 'calendario': cargarCalendario(); break;
+        case 'perfil': actualizarPerfilDesdeSQL(); break;
     }
 
-    // 4. Actualizar botones del menú inferior (Dorado/Active)
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); 
-    const activeBtn = Array.from(document.querySelectorAll('.nav-item'))
-        .find(n => n.getAttribute('onclick') && n.getAttribute('onclick').includes(pId)); 
-    
-    if (activeBtn) activeBtn.classList.add('active'); 
+    // 4. ASEGURAR VISIBILIDAD DE LA NAV BAR
+    const bottomNav = document.querySelector('.bottom-nav');
+    if (bottomNav) {
+        // En estas páginas la barra SIEMPRE debe estar visible (flex)
+        bottomNav.style.display = "flex"; 
+    }
+
+    // 5. ACTUALIZAR ESTADO VISUAL DE LOS BOTONES (Dorado/Active)
+    document.querySelectorAll('.nav-item').forEach(n => {
+        n.classList.remove('active');
+        // Verificamos si el onclick del botón contiene el ID de la página actual
+        const clickAction = n.getAttribute('onclick') || "";
+        if (clickAction.includes(`'${pId}'`) || clickAction.includes(`"${pId}"`)) {
+            n.classList.add('active');
+        }
+    });
 }
 
 // --- ESCUCHADOR DE RECARGA ---
@@ -496,7 +503,7 @@ function hideDetails() {
         });
 
         // Paso D: Vaciar el contenedor y forzar su desaparición
-        videoContainer.innerHTML = ""; 
+        //videoContainer.innerHTML = ""; 
         videoContainer.style.display = "none";
     }
 
