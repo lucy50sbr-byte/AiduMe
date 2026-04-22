@@ -14,18 +14,21 @@ function toggleAuthMode() {
     const ageField = document.getElementById('reg-age');
     const emailField = document.getElementById('reg-email'); //
     const captchaCont = document.getElementById('captcha-container'); //
+    const notifCont = document.getElementById('notif-req-container');
     const mainBtn = document.getElementById('main-auth-btn');
 
     if (isRegisterMode) {
         ageField.style.display = "block";
         emailField.style.display = "block"; // Se vuelve visible
         captchaCont.style.display = "block"; // Se vuelve visible
+        notifCont.style.display = "block";
         generarCaptcha();
         mainBtn.innerText = "CREAR CUENTA";
     } else {
         ageField.style.display = "none";
         emailField.style.display = "none"; // Se oculta en login
         captchaCont.style.display = "none"; // Se oculta en login
+        notifCont.style.display = "none";
         mainBtn.innerText = "ENTRAR";
     }
 }
@@ -43,10 +46,19 @@ async function ejecutarAuth() {
             const email = document.getElementById('reg-email')?.value.trim();
             const age = document.getElementById('reg-age').value;
             const captchaInput = document.getElementById('reg-captcha-input')?.value.trim().toUpperCase();
+            const notifCheck = document.getElementById('reg-notif-check').checked;
 
             // 1. Validaciones básicas
             if (!email || !age) return mostrarAlerta("Todos los campos (incluyendo Email y Edad) son obligatorios");
             
+            if (!notifCheck) {
+                return goldAlert({
+                    title: "RADAR DESACTIVADO",
+                    text: "Para unirte a la experiencia Gold de AiduMe, es obligatorio aceptar el radar de notificaciones.",
+                    icon: "📡"
+                });
+            }
+
             // 2. Validación de Captcha
             if (captchaInput !== captchaActual) {
                 mostrarAlerta("Código Captcha incorrecto. Inténtalo de nuevo.");
@@ -96,6 +108,18 @@ async function procederConRegistro() {
     const age = document.getElementById('reg-age').value;
 
     try {
+        // --- VALIDACIÓN DE ACCESO GOLD (NOTIFICACIONES) ---
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            await goldAlert({
+                title: "ACCESO RESTRINGIDO",
+                text: "No podemos otorgarte el rango de usuario si el radar de notificaciones está bloqueado. La aplicación se reiniciará para proteger el sistema.",
+                icon: "🔐"
+            });
+            location.reload();
+            return;
+        }
+
         // 5. Control de IP (Máximo 2 cuentas)
         const userIP = await obtenerIP();
         const { count, error: ipError } = await _db
@@ -137,7 +161,9 @@ function finalizarLogin(perfil) {
     localStorage.setItem('aidume_profile', JSON.stringify({ 
         name: perfil.nombre, 
         age: perfil.edad,
-        rol: perfil.rol || 'user'
+        rol: perfil.rol || 'user',
+        premium: perfil.es_premium || false,
+        avatar_id: perfil.avatar_id || '1'
     }));
     
     // Mostramos el icono de chat antes de cualquier otra acción
@@ -194,6 +220,13 @@ function solicitarPermisoNotificaciones() {
     });
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    const captchaRefreshBtn = document.getElementById('captcha-refresh-btn');
+    if (captchaRefreshBtn) {
+        captchaRefreshBtn.addEventListener('click', generarCaptcha);
+    }
+});
+
 let captchaActual = "";
 
 // Genera un código aleatorio para el captcha
@@ -218,20 +251,34 @@ async function obtenerIP() {
 
 // Configuración
 const CONFIG_ADS = {
-    url: "https://tu-enlace-de-anuncio.com",
-    clicsNecesarios: 2, // El anuncio sale al segundo clic
+    url: "https://www.profitablecpmratenetwork.com/ps9ru812?key=d28fbdf372a7cab7448a65e46cd2b188", 
+    clicsNecesarios: 1, 
     tiempoEspera: 60000 // O esperar 1 minuto entre anuncios (en milisegundos)
 };
 
 function lanzarAnuncio() {
+    const perfil = JSON.parse(localStorage.getItem('aidume_profile'));
+    
+    // --- FILTRO DE ORO: SI ES PREMIUM, NO HAY ANUNCIOS ---
+    if (perfil && perfil.premium) {
+        console.log("💎 Usuario Premium detectado: Disfrutando sin anuncios.");
+        return;
+    }
+
     // Obtenemos el contador actual del almacenamiento de sesión
     let clics = parseInt(sessionStorage.getItem('conteoAnuncio')) || 0;
     clics++;
 
     if (clics >= CONFIG_ADS.clicsNecesarios) {
-        // Abrimos el anuncio en una pestaña nueva
-        window.open(CONFIG_ADS.url, '_blank');
+        // Intentamos abrir el anuncio. Guardamos la referencia para verificar.
+        const adWindow = window.open(CONFIG_ADS.url, '_blank');
         
+        if (!adWindow || adWindow.closed || typeof adWindow.closed === 'undefined') {
+            console.warn("⚠️ El anuncio de Oro fue bloqueado por el navegador o un AdBlocker.");
+        } else {
+            console.log("💰 Anuncio de Oro lanzado. Esperando registro de Adsterra...");
+        }
+
         // Reiniciamos el contador
         sessionStorage.setItem('conteoAnuncio', '0');
     } else {

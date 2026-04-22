@@ -14,6 +14,8 @@ async function initApp() {
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
     activarNotificacionesEnVivo();
+    iniciarContadorOnline();
+    verificarPagoAutomatico();
 }
 
 async function cargarHome() {
@@ -85,6 +87,7 @@ async function showDetails(a) {
                     .select('episodio_num')
                     .eq('usuario_nombre', currentUser)
                     .eq('anime_id', a.mal_id);
+                console.log(`📚 Episodios vistos cargados para ${currentUser} (Anime ID ${a.mal_id}):`, vistos);
                 if (vistos) listaVistos = vistos.map(v => v.episodio_num);
             }
 
@@ -262,29 +265,12 @@ async function reportarFalla(numEpisodio, nombreAnime) {
 }
 
 // FUNCIÓN AUXILIAR PARA EL CHECKBOX (Agrégala también en api.js)
-async function toggleEpisodioVisto(animeId, epNum, checkbox) {
-    if (!currentUser) return alert("Inicia sesión para guardar tu progreso");
-    try {
-        if (checkbox.checked) {
-            await _db.from('episodios_vistos').insert([{
-                usuario_nombre: currentUser,
-                anime_id: animeId,
-                episodio_num: epNum
-            }]);
-        } else {
-            await _db.from('episodios_vistos').delete()
-                .eq('usuario_nombre', currentUser)
-                .eq('anime_id', animeId)
-                .eq('episodio_num', epNum);
-        }
-    } catch (err) { console.error("Error guardando progreso:", err); }
-}
-
+/**
+ * Guarda el anime en la lista de "Vistos recientemente" del historial.
+ */
 async function saveHistory(a) {
     if (!currentUser) return;
-
     try {
-        // 1. Guardar el anime en el historial de vistos
         await _db.from('vistos').upsert({
             usuario_nombre: currentUser,
             anime_id: a.mal_id,
@@ -292,42 +278,90 @@ async function saveHistory(a) {
             imagen_url: a.images.jpg.image_url,
             fecha_visto: new Date().toISOString()
         }, { onConflict: 'usuario_nombre, anime_id' });
-
-        // 2. OBTENER PROGRESO ACTUAL DE SUPABASE
-        const { data: perfil } = await _db
-            .from('perfiles')
-            .select('xp, nivel')
-            .eq('nombre', currentUser)
-            .single();
-
-        let nuevaXP = (perfil.xp || 0) + 1;
-        let nuevoNivel = perfil.nivel || 1;
-
-        // 3. SUBIR DE NIVEL (Cada 3 de XP)
-        if (nuevaXP >= 3) {
-            nuevaXP = 0;
-            nuevoNivel++;
-        }
-
-        // 4. GUARDAR CAMBIOS EN LA NUBE
-        await _db
-            .from('perfiles')
-            .update({ xp: nuevaXP, nivel: nuevoNivel })
-            .eq('nombre', currentUser);
-
-        console.log(`✅ XP: ${nuevaXP}/3 | Nivel: ${nuevoNivel}`);
-
-        // Actualizar la interfaz si el usuario está en la pestaña de perfil
-        if (typeof actualizarPerfilDesdeSQL === 'function') {
-            actualizarPerfilDesdeSQL();
-        }
-
     } catch (err) {
-        console.error("❌ Error al subir XP:", err);
+        console.error("❌ Error al guardar historial reciente:", err);
     }
 }
 
-// ... (Copia aquí tus funciones de updateListButton, rateAnime, cargarPuntuacionComunidad tal cual las tenías)
+// --- SISTEMA DE RECOMPENSAS GOLD (GLOBAL) ---
+async function ganarRecompensaGold({ xp = 0, fichas = 0, silencioso = true }) {
+    if (!currentUser) return;
+    try {
+        const { data: perfil, error } = await _db
+            .from('perfiles')
+            .select('xp, nivel, aidufichas')
+            .eq('nombre', currentUser)
+            .single();
+
+        if (error) throw error;
+
+        let nuevaXP = (perfil.xp || 0) + xp;
+        let nuevoNivel = perfil.nivel || 1;
+        let nuevasFichas = (perfil.aidufichas || 0) + fichas;
+
+        while (nuevaXP >= 3) {
+            nuevaXP -= 3;
+            nuevoNivel++;
+            if (!silencioso) {
+                // Si la función existe, lanzamos la fiesta
+                if (typeof lanzarConfetiGold === 'function') lanzarConfetiGold();
+                goldAlert({ title: "¡NIVEL ALCANZADO!", text: `Has subido al Nivel ${nuevoNivel}. ¡Tu rango aumenta!`, icon: "🆙" });
+            }
+        }
+
+        await _db.from('perfiles').update({ 
+            xp: nuevaXP, 
+            nivel: nuevoNivel, 
+            aidufichas: nuevasFichas 
+        }).eq('nombre', currentUser);
+
+        if (typeof actualizarPerfilDesdeSQL === 'function') actualizarPerfilDesdeSQL();
+    } catch (err) {
+        console.error("Error al procesar recompensa:", err);
+    }
+}
+
+function iniciarContadorOnline() {
+    // Cada 1 hora (3600000 ms) otorga 1 XP y 10 Aidufichas
+    setInterval(() => {
+        if (currentUser) {
+            ganarRecompensaGold({ xp: 1, fichas: 10, silencioso: false });
+            console.log("💎 Recompensa por fidelidad otorgada: 1XP + 10 Aidufichas");
+        }
+    }, 3600000);
+}
+
+/**
+ * Gestiona el guardado real en la base de datos y otorga premios.
+ */
+async function toggleEpisodioVisto(animeId, epNum, checkbox) {
+    if (!currentUser) return goldAlert({ text: "Inicia sesión para guardar tu progreso", icon: "👤" });
+
+    try {
+        if (checkbox.checked) {
+            const { error } = await _db.from('episodios_vistos').insert([{
+                usuario_nombre: currentUser,
+                anime_id: animeId,
+                episodio_num: epNum
+            }]);
+            if (error) throw error;
+
+            console.log(`✅ Guardado en DB: Anime ${animeId}, Ep ${epNum}`);
+            ganarRecompensaGold({ xp: 1, fichas: 2 }); 
+        } else {
+            const { error } = await _db.from('episodios_vistos').delete()
+                .eq('usuario_nombre', currentUser)
+                .eq('anime_id', animeId)
+                .eq('episodio_num', epNum);
+            if (error) throw error;
+
+            console.log(`❌ Eliminado de DB: Anime ${animeId}, Ep ${epNum}`);
+        }
+    } catch (err) {
+        console.error("🚨 Error en toggleEpisodioVisto:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo sincronizar el progreso.", icon: "❌" });
+    }
+}
 
 // [IMPORTANTE: BORRA LA FUNCIÓN saveHistory QUE ESTABA AL FINAL DE TU ARCHIVO VIEJO]
 
@@ -764,62 +798,74 @@ async function postearComentario() {
 async function cargarComentarios(id) {
     const list = document.getElementById('lista-comentarios');
     if (!list) return; 
-    
     list.innerHTML = ""; 
 
     try {
+        // Traemos el comentario y los datos actuales del perfil del autor (avatar y premium)
         const { data: c, error } = await _db
             .from('comentarios')
-            .select('*')
+            .select('*, perfiles(avatar_id, es_premium)') 
             .eq('anime_id', id)
             .order('fecha', { ascending: false });
 
-        if (error) throw error;
+        if (error) {
+            console.error("Error con el vínculo de perfiles:", error.message);
+            // Si falla el JOIN, intentamos cargar solo los comentarios sin perfiles
+            const { data: backup } = await _db.from('comentarios').select('*').eq('anime_id', id).order('fecha', { ascending: false });
+            if (backup) renderizarComentarios(backup, list);
+            return;
+        }
 
         if (!c || c.length === 0) {
             list.innerHTML = "<p style='font-size:0.9rem; opacity:0.5; text-align:center; padding: 20px;'>No hay comentarios aún.</p>";
             return;
         }
 
-        c.forEach(x => { 
-            const d = document.createElement('div'); 
-            d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
-            
-            const avatarEncontrado = AVATARES_RANGOS.find(av => av.id === String(x.avatar_id));
-            const urlAvatar = avatarEncontrado ? avatarEncontrado.img : "https://api.dicebear.com/7.x/avataaars/svg?seed=User";
-
-            d.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 10px;">
-                    <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
-                         style="width: 35px; height: 35px; border-radius: 50%; border: 1px solid var(--gold); background: #111; cursor: pointer;">
-                    
-                    <div style="flex: 1;">
-                        <strong class="go-to-profile" data-user="${x.usuario}"
-                                style="color:var(--gold); font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
-                            @${x.usuario}
-                        </strong>
-                        <span style="font-size:0.9rem; color: #eee; word-wrap: break-word;">${x.comentario}</span>
-                    </div>
-                    
-                    <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
-                </div>
-            `; 
-
-            // ASIGNACIÓN MANUAL DEL CLICK (Esto no falla)
-            d.querySelectorAll('.go-to-profile').forEach(el => {
-                el.addEventListener('click', () => {
-                    const nick = el.getAttribute('data-user');
-                    console.log("Navegando al perfil de:", nick);
-                    verPerfilAjeno(nick);
-                });
-            });
-
-            list.appendChild(d);
-        });
+        renderizarComentarios(c, list);
 
     } catch (err) {
-        console.error("Error:", err.message);
+        console.error("Error fatal en comentarios:", err.message);
+        list.innerHTML = "<p style='color:red; text-align:center;'>Error de conexión con la biblioteca.</p>";
     }
+}
+
+// Función auxiliar para dibujar los comentarios en la pantalla
+function renderizarComentarios(comentarios, contenedor) {
+    const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+    
+    comentarios.forEach(x => { 
+        const d = document.createElement('div'); 
+        d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
+        
+        // LÓGICA DE ACTUALIZACIÓN AUTOMÁTICA: 
+        // Priorizamos el avatar del perfil (perfiles.avatar_id) sobre el guardado en el comentario
+        const perfilData = Array.isArray(x.perfiles) ? x.perfiles[0] : x.perfiles;
+        // Si perfilData existe, usamos SU avatar_id (el nuevo). Si no, usamos el del comentario como respaldo.
+        const avId = (perfilData && perfilData.avatar_id) ? perfilData.avatar_id : (x.avatar_id || '1');
+        const esPremium = perfilData?.es_premium || false;
+        const av = todosLosAvatares.find(a => a.id === String(avId));
+        const urlAvatar = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${x.usuario}`;
+
+        d.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
+                <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
+                     style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid ${esPremium ? 'var(--gold)' : '#333'}; background: #111; cursor: pointer; object-fit: cover;">
+                <div style="flex: 1;">
+                    <strong class="go-to-profile" data-user="${x.usuario}"
+                            style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
+                        @${x.usuario} ${esPremium ? '👑' : ''}
+                    </strong>
+                    <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word;">${x.comentario}</span>
+                </div>
+                <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
+            </div>`; 
+
+        // Vincular el click al perfil
+        d.querySelectorAll('.go-to-profile').forEach(el => {
+            el.onclick = () => verPerfilAjeno(el.getAttribute('data-user'));
+        });
+        contenedor.appendChild(d);
+    });
 }
 
 async function cargarCalendario() {
@@ -964,74 +1010,6 @@ function hideDetails() { document.getElementById('details').style.display = "non
 // CORRECCIÓN: Comillas invertidas para búsqueda manual
 function buscarAnime() { const q = document.getElementById('busqueda').value; fetch(`https://api.jikan.moe/v4/anime?q=${q}&limit=12`).then(r=>r.json()).then(j=>renderGrid(j.data, 'lista')); }
 
-/*function actualizarNivelOtaku() {
-    const h = JSON.parse(localStorage.getItem('hist_' + currentUser)) || [];
-    const totalVistos = h.length;
-    
-    const nivel = Math.floor(totalVistos / 3) + 1;
-    const xpEnNivel = totalVistos % 3;
-    const porcentajeXP = (xpEnNivel / 3) * 100;
-
-    let rango = "ASPIRANTE";
-    if (nivel >= 2) rango = "GENIN";
-    if (nivel >= 3) rango = "CHUNIN";
-    if (nivel >= 4) rango = "JOUNIN";
-    if (nivel >= 5) rango = "HOKAGE";
-
-    const rankElem = document.getElementById('display-rank');
-    const barElem = document.getElementById('xp-bar');
-    const txtElem = document.getElementById('xp-text');
-
-    // CORRECCIÓN: Comillas invertidas para los textos del perfil
-    if (rankElem) rankElem.innerText = `${rango} (LVL ${nivel})`;
-    if (barElem) barElem.style.width = porcentajeXP + "%";
-    if (txtElem) txtElem.innerText = `${xpEnNivel}/3 para el siguiente nivel`;
-}*/
-
-// Variable global para el temporizador
-let tiempoBusqueda;
-
-// FUNCIÓN ÚNICA DE BÚSQUEDA FUSIONADA (CORREGIDA)
-async function buscarAnimeFusion(queryManual = null) {
-    const busquedaInput = document.getElementById('busqueda');
-    const q = queryManual !== null ? queryManual : busquedaInput.value.trim();
-    const paginacion = document.getElementById('paginacion-container'); // Referencia al contenedor de páginas
-    
-    // Si no hay texto, restauramos el Home original
-    if (q.length === 0) {
-        cargarHome();
-        cargarTodosLosAnimes(1); 
-        // --- RESTAURACIÓN: Volvemos a mostrar los botones de página ---
-        if (paginacion) paginacion.style.display = "flex"; 
-        return;
-    }
-
-    if (queryManual === null && q.length < 3) return;
-
-    if (tiempoBusqueda) clearTimeout(tiempoBusqueda);
-
-    const listaTodos = document.getElementById('lista-todos');
-    if (listaTodos) {
-        listaTodos.innerHTML = "<p style='width:100%; text-align:center; color:var(--gold);'>Buscando en la biblioteca...</p>";
-    }
-
-    tiempoBusqueda = setTimeout(async () => {
-        try {
-            const r = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=desc`);
-            const j = await r.json();
-            
-            if (j.data) {
-                renderGrid(j.data, 'lista-todos');
-                
-                // --- OCULTAR: Durante una búsqueda no tiene sentido mostrar "Página 1 de la lista general" ---
-                if (paginacion) paginacion.style.display = "none";
-            }
-        } catch (err) {
-            console.error("Error en búsqueda:", err);
-        }
-    }, 500);
-}
-
 // Vinculamos las llamadas de los eventos a la función maestra
 function buscarAnime() { buscarAnimeFusion(); }
 function buscarAnimeLive() { buscarAnimeFusion(); }
@@ -1133,31 +1111,6 @@ async function limpiarHistorialUsuario() {
 }
 
 // NUEVA FUNCIÓN PARA GUARDAR EN LA NUBE
-async function toggleEpisodioVisto(animeId, epNum, checkbox) {
-    if (!currentUser) return alert("Inicia sesión para guardar tu progreso");
-
-    try {
-        if (checkbox.checked) {
-            // Guardar visto
-            await _db.from('episodios_vistos').insert([{
-                usuario_nombre: currentUser,
-                anime_id: animeId,
-                episodio_num: epNum
-            }]);
-            console.log(`Episodio ${epNum} marcado como visto`);
-        } else {
-            // Eliminar visto
-            await _db.from('episodios_vistos').delete()
-                .eq('usuario_nombre', currentUser)
-                .eq('anime_id', animeId)
-                .eq('episodio_num', epNum);
-            console.log(`Episodio ${epNum} desmarcado`);
-        }
-    } catch (err) {
-        console.error("Error al guardar progreso:", err.message);
-    }
-}
-
 async function checkUserRating(animeId) {
     if (!currentUser) return;
     
@@ -1862,7 +1815,47 @@ async function reproducirEpisodio(titulo, num) {
     
     if (!container || !currentAnime) return;
 
-    // 1. LIMPIEZA INMEDIATA
+    // --- 💎 CONTROL DE ACCESO PREMIUM Y ANUNCIOS ---
+    const perfil = JSON.parse(localStorage.getItem('aidume_profile'));
+    const esPremium = perfil && perfil.premium;
+
+    if (!esPremium) {
+        // Lanzamos el anuncio (Pop-under)
+        if (typeof lanzarAnuncio === 'function') lanzarAnuncio();
+
+        // Preparamos el contenedor para mostrar la espera Gold
+        container.style.display = "block";
+        container.innerHTML = `
+            <div id="ad-wait-screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; min-height:300px; background:#050505; border: 2px solid var(--gold); border-radius:15px; text-align:center; padding:20px; box-sizing: border-box;">
+                <div style="font-size:3rem; margin-bottom:15px; animation: pulseGold 2s infinite;">⏳</div>
+                <h3 style="color:var(--gold); text-transform:uppercase; margin-bottom:10px; font-size:1.1rem; letter-spacing:1px;">Preparando Acceso Gold</h3>
+                <p style="color:#eee; font-size:0.9rem;">El reproductor se activará en <span id="segundos-espera" style="font-weight:bold; font-size:1.8rem; color:var(--gold);">20</span> segundos.</p>
+                <div style="margin-top:25px; padding:15px; background:rgba(255,215,0,0.05); border-radius:10px; border:1px solid rgba(255,215,0,0.2);">
+                    <p style="font-size:0.8rem; color:#888; margin:0 0 10px 0;">👑 ¿Cansado de los anuncios y la espera?</p>
+                    <button onclick="showPage('perfil')" class="btn-random-gold" style="margin:0; width:100%;">OBTENER RANGO PREMIUM</button>
+                </div>
+            </div>`;
+        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Contador de 20 segundos real
+        let seg = 20;
+        await new Promise(resolve => {
+            const timer = setInterval(() => {
+                seg--;
+                const display = document.getElementById('segundos-espera');
+                if (display) display.innerText = seg;
+                if (seg <= 0) {
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 1000);
+        });
+    } else {
+        // Si es premium, esperamos solo un suspiro para estabilidad
+        await new Promise(resolve => setTimeout(resolve, 400));
+    }
+
+    // 1. LIMPIEZA
     container.innerHTML = ""; 
     container.style.display = "block";
     
@@ -2090,7 +2083,7 @@ async function cargarMensajesChat() {
         .from('chat_global')
         .select(`
             id, usuario, mensaje, fecha,
-            perfiles (avatar_id, es_premium)
+            perfiles (avatar_id, es_premium, tema_chat)
         `) // --- NUEVO: Traemos el estado premium desde perfiles ---
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
@@ -2102,10 +2095,12 @@ async function cargarMensajesChat() {
 
     if (mensajes) {
         container.innerHTML = mensajes.map(m => {
+            const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
             // Datos del perfil y sistema de avatares
-            const esPremium = m.perfiles?.es_premium;
-            const avId = m.perfiles?.avatar_id || '1';
-            const avData = AVATARES_RANGOS.find(a => a.id === avId) || AVATARES_RANGOS[0];
+            const perfilData = Array.isArray(m.perfiles) ? m.perfiles[0] : m.perfiles;
+            const esPremium = perfilData?.es_premium;
+            const avId = perfilData?.avatar_id || '1';
+            const avData = todosLosAvatares.find(a => a.id === String(avId)) || AVATARES_RANGOS[0];
             
             // --- LÓGICA VISUAL PREMIUM ---
             // Si es premium, aplicamos borde dorado, fondo especial y posición relativa para la corona
@@ -2379,10 +2374,58 @@ window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confi
     });
 };
 
+async function verificarPagoAutomatico() {
+    const params = new URLSearchParams(window.location.search);
+    // Mercado Pago suele enviar 'status=approved' o 'collection_status=approved'
+    const status = params.get('status') || params.get('collection_status');
+    const pagoExito = params.get('pago') === 'exito';
+
+    if ((status === 'approved' || pagoExito) && currentUser) {
+        try {
+            // 1. Actualizamos el rango en la base de datos
+            const { error } = await _db
+                .from('perfiles')
+                .update({ es_premium: true })
+                .eq('nombre', currentUser);
+
+            if (error) throw error;
+
+            // 2. Limpiamos la URL para que no se active doble al recargar
+            window.history.replaceState(null, null, window.location.pathname);
+
+            // ¡Celebración de Bienvenida Premium!
+            if (typeof lanzarConfetiGold === 'function') lanzarConfetiGold();
+
+            // 3. Alerta Gold de Bienvenida al Club
+            await goldAlert({
+                title: "¡ACCESO DE ÉLITE ACTIVADO!",
+                text: "Tu pago ha sido verificado con éxito. A partir de ahora eres miembro PREMIUM de AiduMe. Disfruta de la experiencia sin esperas ni anuncios.",
+                icon: "👑",
+                confirmText: "EMPEZAR AHORA"
+            });
+
+            // 4. Actualizamos el perfil en el almacenamiento local
+            const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
+            if (perfilLocal) {
+                perfilLocal.premium = true;
+                localStorage.setItem('aidume_profile', JSON.stringify(perfilLocal));
+            }
+
+            // Recarga para aplicar los cambios en toda la app
+            location.reload();
+
+        } catch (err) {
+            console.error("Error al activar Premium automático:", err);
+        }
+    }
+}
+
 function activarNotificacionesEnVivo() {
-    // Nos suscribimos a inserciones en la tabla de episodios
-    _db.channel('public:enlaces_episodios')
+    console.log("📡 Conectando con el radar de episodios Gold...");
+    
+    _db.channel('radar-episodios')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'enlaces_episodios' }, async (payload) => {
+        console.log("⚡ ¡Cambio detectado en la base de datos!", payload);
         const nuevoEp = payload.new;
         
         // Para que la notificación sea "Gold", necesitamos el nombre del anime (Jikan)
@@ -2405,22 +2448,22 @@ function activarNotificacionesEnVivo() {
     .subscribe();
 }
 
-function lanzarNotificacionSistema(titulo, cuerpo, imagen) {
+async function lanzarNotificacionSistema(titulo, cuerpo, imagen) {
     if (Notification.permission === "granted") {
         const opciones = {
             body: cuerpo,
             icon: imagen || 'logo-grande.png',
             badge: 'logo-grande.png',
             vibrate: [200, 100, 200],
-            silent: false
         };
         
-        // Sonido y vibración Gold
-        const n = new Notification(titulo, opciones);
-        n.onclick = () => {
-            window.focus();
-            n.close();
-        };
+        // Usar Service Worker si está disponible (Mejor para móviles)
+        if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.ready;
+            reg.showNotification(titulo, opciones);
+        } else {
+            new Notification(titulo, opciones);
+        }
     }
 }
 

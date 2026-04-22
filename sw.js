@@ -11,3 +11,17 @@ self.addEventListener('push', function(event) {
         self.registration.showNotification(data.title, options)
     );
 });
+
+// Manejar el clic en la notificación para abrir AiduMe
+self.addEventListener('notificationclick', function(event) {
+    event.notification.close();
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+            if (clientList.length > 0) {
+                let client = clientList[0];
+                if ('focus' in client) return client.focus();
+            }
+            if (clients.openWindow) return clients.openWindow('/');
+        })
+    );
+});

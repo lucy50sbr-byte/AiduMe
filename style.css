@@ -1765,3 +1765,204 @@ header {
 .gold-alert-input:focus {
     box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
 }
+
+/* --- REQUISITO DE NOTIFICACIONES (GOLD REGISTRATION) --- */
+.notif-requirement-card {
+    margin-bottom: 20px;
+    text-align: left;
+    padding: 15px;
+    background: rgba(255, 215, 0, 0.05);
+    border-radius: 12px;
+    border: 1.5px solid rgba(255, 215, 0, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+    transition: 0.3s;
+    width: 90%; /* Ajuste para que coincida con el ancho de tus inputs */
+    margin: 0 auto 20px auto; /* Centra la tarjeta en la auth-card */
+    box-sizing: border-box;
+}
+
+/* Ajuste crítico para que el cuadro no se mueva ni se esconda */
+.notif-requirement-card .custom-checkbox {
+    flex-shrink: 0; /* Impide que el checkbox se aplaste o se desplace */
+    display: block;
+    margin: 0;
+}
+
+.notif-requirement-card:hover {
+    border-color: var(--gold);
+    background: rgba(255, 215, 0, 0.08);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.1);
+}
+
+/* --- CAPTCHA GOLD EDITION --- */
+.captcha-gold-card {
+    display: none; /* Controlado por JS */
+    margin-bottom: 20px;
+    background: rgba(255, 215, 0, 0.05);
+    padding: 15px;
+    border-radius: 12px;
+    border: 1.5px dashed var(--gold);
+    border: 1.5px solid var(--gold);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.1);
+    text-align: center;
+    width: 90%; /* Ajuste para que coincida con el ancho de tus inputs */
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+}
+
+.captcha-gold-header {
+    font-size: 0.8rem;
+    color: var(--gold);
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.captcha-gold-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+}
+
+.captcha-gold-display {
+    font-weight: bold;
+    letter-spacing: 4px; /* Más espaciado para un look más "código" */
+    background: #222;
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: var(--gold); /* El texto del captcha en dorado */
+    user-select: none;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    min-width: 90px; /* Asegura un ancho mínimo */
+    text-align: center;
+    font-size: 1.1rem;
+    font-family: 'Courier New', Courier, monospace; /* Fuente de código */
+    text-shadow: 0 0 5px rgba(255, 215, 0, 0.5);
+}
+
+.captcha-gold-input {
+    width: 80px;
+    text-align: center;
+    padding: 8px;
+    font-size: 1rem;
+    border-radius: 8px;
+    background: #1a1a1a;
+    border: 1px solid var(--gold);
+    color: white;
+    outline: none;
+}
+
+.captcha-gold-input:focus {
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+
+.captcha-refresh-btn {
+    background: rgba(255, 215, 0, 0.1);
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: 0.3s;
+}
+
+.captcha-refresh-btn:hover {
+    background: var(--gold);
+    color: black;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+    transform: rotate(30deg);
+}
+
+/* --- ESTILOS TIENDA --- */
+.store-item-card-premium {
+    background: linear-gradient(135deg, rgba(255,215,0,0.1), rgba(0,212,255,0.1));
+    border: 2px solid var(--gold);
+    border-radius: 15px;
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
+}
+
+.avatar-buy-card {
+    text-align: center;
+    background: rgba(255,255,255,0.03);
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,215,0,0.1);
+}
+
+/* --- SISTEMA DE TARJETAS --- */
+.card-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.card-input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.card-input-wrapper i {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--gold);
+    opacity: 0.5;
+}
+
+.payment-method-btn {
+    flex: 1;
+    padding: 10px;
+    font-size: 0.7rem;
+    margin: 0;
+}
+
+/* --- TEMAS DE CHAT (SKINS) --- */
+.chat-skin-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,215,0,0.1);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+    transition: 0.3s;
+}
+
+.chat-skin-card:hover { border-color: var(--gold); }
+
+/* Estilos aplicados al mensaje del chat */
+.msg-skin-neon { 
+    border: 1.5px solid #00d4ff !important; 
+    box-shadow: inset 0 0 15px rgba(0, 212, 255, 0.2) !important;
+}
+.msg-skin-sakura { 
+    border: 1.5px solid #ff85a1 !important; 
+    box-shadow: inset 0 0 15px rgba(255, 133, 161, 0.2) !important;
+}
+.msg-skin-inferno { 
+    border: 1.5px solid #ff4500 !important; 
+    box-shadow: inset 0 0 15px rgba(255, 69, 0, 0.2) !important;
+}
+.msg-skin-emerald { 
+    border: 1.5px solid #2ecc71 !important; 
+    box-shadow: inset 0 0 15px rgba(46, 204, 113, 0.2) !important;
+}

@@ -1,5 +1,31 @@
 let dataSaver = localStorage.getItem('data_saver') === 'true';
 
+// Reemplaza esto con tu "Publishable key" de Stripe (empieza con pk_test_... o pk_live_...)
+const stripe = typeof Stripe !== 'undefined' ? Stripe('pk_test_51TOscL1oJk3N94k9OQcSuL8ji1Ib2vAj57ox4vfct1lxPYJFu69Hs5Oo2c4aPS45UnQ7B4D1H4kJAXI1Sk3dnEb900AscPaVK3') : null;
+
+function lanzarConfetiGold() {
+    if (typeof confetti !== 'undefined') {
+        const duration = 3 * 1000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 11000 };
+
+        const randomInRange = (min, max) => Math.random() * (max - min) + min;
+
+        const interval = setInterval(function() {
+            const timeLeft = animationEnd - Date.now();
+
+            if (timeLeft <= 0) {
+                return clearInterval(interval);
+            }
+
+            const particleCount = 50 * (timeLeft / duration);
+            // Lluvia de oro y blanco desde ángulos aleatorios
+            confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 }, colors: ['#ffd700', '#ffffff', '#ffcc00'] });
+            confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 }, colors: ['#ffd700', '#ffffff', '#ffcc00'] });
+        }, 250);
+    }
+}
+
 const AVATARES_RANGOS = [
     { id: '1', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
     { id: '2', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka' },
@@ -8,6 +34,239 @@ const AVATARES_RANGOS = [
     { id: '5', minLvl: 20, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Milo' },  
     { id: '6', minLvl: 50, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Zoe' }    
 ];
+
+const AVATARES_TIENDA = [
+    { id: 'shop_1', costo: 100, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Goku', nombre: 'Guerrero Z' },
+    { id: 'shop_2', costo: 250, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Luffy', nombre: 'Pirata' },
+    { id: 'shop_3', costo: 500, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Naruto', nombre: 'Ninja' },
+    { id: 'shop_4', costo: 1000, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ichigo', nombre: 'Shinigami' },
+    { id: 'shop_5', costo: 1500, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Zenitsu', nombre: 'Rayo Dorado' },
+    { id: 'shop_6', costo: 2000, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Saitama', nombre: 'Calvo de Oro' },
+    { id: 'shop_7', costo: 3000, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sasuke', nombre: 'Vengador' },
+    { id: 'shop_8', costo: 5000, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Zoro', nombre: 'Espadachín' }
+];
+
+const TEMAS_CHAT = [
+    { id: 'neon', costo: 800, nombre: 'Ciber Neón', class: 'msg-skin-neon', color: '#00d4ff' },
+    { id: 'sakura', costo: 1200, nombre: 'Flor Sakura', class: 'msg-skin-sakura', color: '#ff85a1' },
+    { id: 'inferno', costo: 2500, nombre: 'Infierno', class: 'msg-skin-inferno', color: '#ff4500' },
+    { id: 'emerald', costo: 4000, nombre: 'Esmeralda', class: 'msg-skin-emerald', color: '#2ecc71' }
+];
+
+function abrirTienda() {
+    const modal = document.getElementById('modal-tienda');
+    const grid = document.getElementById('tienda-avatares-grid');
+    if (!modal || !grid) return;
+
+    grid.innerHTML = "";
+    AVATARES_TIENDA.forEach(av => {
+        const div = document.createElement('div');
+        div.className = "avatar-buy-card";
+        div.innerHTML = `
+            <img src="${av.img}" style="width:50px; border-radius:50%; border: 1px solid var(--gold); background:#111;">
+            <div style="font-size:0.6rem; color:#fff; margin:5px 0;">${av.nombre}</div>
+            <button onclick="comprarAvatar('${av.id}', ${av.costo}, '${av.img}')" 
+                    style="background:var(--gold); border:none; border-radius:5px; font-size:0.6rem; padding:4px 8px; cursor:pointer; font-weight:bold;">
+                💰 ${av.costo}
+            </button>
+        `;
+        grid.appendChild(div);
+    });
+
+    // Cargar Temas
+    const gridTemas = document.getElementById('tienda-temas-grid');
+    if (gridTemas) {
+        gridTemas.innerHTML = "";
+        TEMAS_CHAT.forEach(t => {
+            const div = document.createElement('div');
+            div.className = "chat-skin-card";
+            div.innerHTML = `
+                <div style="width:20px; height:20px; background:${t.color}; border-radius:50%; margin:0 auto 5px; box-shadow: 0 0 10px ${t.color};"></div>
+                <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${t.nombre}</div>
+                <button onclick="comprarTema('${t.id}', ${t.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">💰 ${t.costo}</button>
+            `;
+            gridTemas.appendChild(div);
+        });
+    }
+
+    modal.style.display = 'flex';
+}
+
+function cerrarTienda() { document.getElementById('modal-tienda').style.display = 'none'; }
+
+async function comprarAvatar(id, costo, imgUrl) {
+    const { data: perfil } = await _db.from('perfiles').select('aidufichas, avatares_comprados').eq('nombre', currentUser).single();
+    
+    if (perfil.aidufichas < costo) {
+        return goldAlert({ title: "FICHAS INSUFICIENTES", text: `Necesitas ${costo} Aidufichas. ¡Sigue viendo anime para ganar más!`, icon: "📉" });
+    }
+
+    const confirmar = await goldAlert({
+        title: "CONFIRMAR COMPRA",
+        text: `¿Quieres canjear ${costo} fichas por este avatar?`,
+        icon: "🛒",
+        showCancel: true
+    });
+
+    if (confirmar) {
+        const nuevasFichas = perfil.aidufichas - costo;
+        // Actualizamos fichas, el avatar actual y lo agregamos a la lista de comprados
+        const listaActualizada = [...(perfil.avatares_comprados || []), id];
+
+        await _db.from('perfiles').update({ 
+            aidufichas: nuevasFichas, 
+            avatar_id: id,
+            avatares_comprados: listaActualizada 
+        }).eq('nombre', currentUser);
+
+        lanzarConfetiGold();
+        goldAlert({ title: "¡COMPRA EXITOSA!", text: "Tu nuevo avatar ha sido equipado.", icon: "✨" });
+        cerrarTienda();
+        actualizarPerfilDesdeSQL();
+    }
+}
+
+async function comprarTema(id, costo) {
+    const { data: perfil } = await _db.from('perfiles').select('aidufichas, temas_comprados').eq('nombre', currentUser).single();
+    
+    if (perfil.temas_comprados?.includes(id)) {
+        // Si ya lo tiene, simplemente lo equipamos
+        await _db.from('perfiles').update({ tema_chat: id }).eq('nombre', currentUser);
+        goldAlert({ title: "TEMA EQUIPADO", text: "Has cambiado el skin de tus mensajes.", icon: "✨" });
+        return cerrarTienda();
+    }
+
+    if (perfil.aidufichas < costo) {
+        return goldAlert({ title: "FICHAS INSUFICIENTES", text: `Necesitas ${costo} fichas para este skin.`, icon: "📉" });
+    }
+
+    const confirmar = await goldAlert({ title: "COMPRAR SKIN", text: `¿Quieres desbloquear el tema por ${costo} fichas?`, icon: "✨", showCancel: true });
+
+    if (confirmar) {
+        const nuevaLista = [...(perfil.temas_comprados || []), id];
+        await _db.from('perfiles').update({ 
+            aidufichas: perfil.aidufichas - costo, 
+            temas_comprados: nuevaLista,
+            tema_chat: id 
+        }).eq('nombre', currentUser);
+        
+        lanzarConfetiGold();
+        goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo skin de chat activado.", icon: "🔥" });
+        cerrarTienda();
+    }
+}
+
+function mostrarCheckoutInterno() {
+    const panel = document.getElementById('checkout-interno');
+    if (panel) panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+function mostrarCheckoutTarjeta() {
+    document.getElementById('checkout-interno').style.display = 'none';
+    const panel = document.getElementById('checkout-tarjeta');
+    if (panel) panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function procesarPagoTarjeta() {
+    const btn = document.getElementById('btn-pagar-tarjeta');
+    const num = document.getElementById('card-number').value.replace(/\s/g, '');
+    const exp = document.getElementById('card-expiry').value;
+    const cvc = document.getElementById('card-cvc').value;
+    const name = document.getElementById('card-name').value.trim();
+
+    if (num.length < 15 || exp.length < 5 || cvc.length < 3 || !name) {
+        return goldAlert({ title: "DATOS INCOMPLETOS", text: "Por favor, completa todos los campos de la tarjeta.", icon: "💳" });
+    }
+
+    btn.disabled = true;
+    btn.innerText = "PROCESANDO...";
+
+    try {
+        // 1. Convertimos los datos en un Token de Stripe (Seguridad PCI)
+        const [expMonth, expYear] = exp.split('/');
+        const { token, error: stripeError } = await stripe.createToken({
+            number: num,
+            exp_month: expMonth,
+            exp_year: expYear,
+            cvc: cvc,
+            name: name
+        });
+
+        if (stripeError) throw new Error(stripeError.message);
+
+        // 2. Enviamos el token a nuestro Backend Gold
+        const response = await fetch(`${_supabaseUrl}/functions/v1/verify-payment`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                usuario: currentUser,
+                monto: 4.0,
+                metodo: 'tarjeta',
+                stripeToken: token.id
+            })
+        });
+
+        const resData = await response.json();
+        if (!response.ok) throw new Error(resData.message || "Error en pasarela");
+
+        // ¡Celebración Gold!
+        lanzarConfetiGold();
+
+        await goldAlert({
+            title: "¡PAGO EXITOSO!",
+            text: "El cobro se ha realizado correctamente. Tu rango PREMIUM ha sido activado de por vida. ¡Disfruta de AiduMe Gold!",
+            icon: "👑",
+            confirmText: "GENIAL"
+        });
+
+        location.reload(); // Recargamos para aplicar el premium
+    } catch (err) {
+        console.error(err);
+        goldAlert({ title: "ERROR DE COBRO", text: err.message, icon: "❌" });
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "PAGAR $4.00 USD";
+    }
+}
+
+async function enviarComprobantePago() {
+    const ref = document.getElementById('pago-referencia').value.trim();
+    
+    if (ref.length < 5) {
+        return goldAlert({ title: "ID INVÁLIDO", text: "Por favor, ingresa un número de operación válido para verificar.", icon: "❌" });
+    }
+
+    try {
+        // En lugar de insertar en la DB desde el cliente (inseguro),
+        // llamamos a nuestro nuevo servidor backend.
+        const response = await fetch(`${_supabaseUrl}/functions/v1/verify-payment`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                usuario: currentUser,
+                referencia: ref,
+                monto: 4.0
+            })
+        });
+
+        const resultado = await response.json();
+        if (!response.ok) throw new Error(resultado.message);
+
+        goldAlert({
+            title: "SOLICITUD ENVIADA",
+            text: "Tu comprobante está siendo analizado por el sistema Gold. El rango Premium se activará en breve una vez confirmados los fondos.",
+            icon: "⏳"
+        });
+        
+        cerrarTienda();
+    } catch (err) {
+        console.error(err);
+        goldAlert({ title: "ERROR", text: "No pudimos procesar la solicitud. Intenta más tarde.", icon: "❌" });
+    }
+}
 
 async function showPage(pId) {
     // 1. RECARGA NUCLEAR MEJORADA
@@ -95,7 +354,10 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         elLevel: document.getElementById('display-level'),
         elVistos: document.getElementById('stat-vistos'),
         elHoras: document.getElementById('stat-horas'),
+        elFichas: document.getElementById('stat-fichas'),
         elEdad: document.getElementById('display-age'),
+        elXPBar: document.getElementById('xp-bar'),
+        elXPText: document.getElementById('xp-text'),
         imgAvatar: document.getElementById('user-avatar'),
         navAvatar: document.getElementById('nav-avatar')
     };
@@ -134,7 +396,17 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         if (elementos.elLevel) elementos.elLevel.innerText = perfil.nivel;
         if (elementos.elVistos) elementos.elVistos.innerText = totalVistos;
         if (elementos.elHoras) elementos.elHoras.innerText = `${horasTotales}h`;
+        if (elementos.elFichas) elementos.elFichas.innerText = perfil.aidufichas || 0;
         if (elementos.elEdad) elementos.elEdad.innerText = perfil.edad || "--";
+
+        // --- ACTUALIZACIÓN VISUAL DE LA BARRA DE XP ---
+        if (elementos.elXPBar) {
+            const porcentaje = ((perfil.xp || 0) / 3) * 100;
+            elementos.elXPBar.style.width = `${porcentaje}%`;
+        }
+        if (elementos.elXPText) {
+            elementos.elXPText.innerText = `${perfil.xp || 0}/3 XP`;
+        }
 
         if (elementos.elBio) {
             elementos.elBio.innerText = perfil.bio 
@@ -144,7 +416,9 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
 
         // --- 4. GESTIÓN DE AVATARES ---
         const avatarActualId = perfil.avatar_id || '1';
-        const avatarEncontrado = AVATARES_RANGOS.find(av => av.id === String(avatarActualId));
+        // BUSQUEDA FUSIONADA: Buscamos en ambas listas
+        const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+        const avatarEncontrado = todosLosAvatares.find(av => av.id === String(avatarActualId));
 
         if (avatarEncontrado) {
             if (elementos.imgAvatar) elementos.imgAvatar.src = avatarEncontrado.img;
@@ -156,7 +430,7 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         
         // El selector solo aparece para el dueño
         if (esMismoUsuario) {
-            renderAvatarSelector(perfil.nivel, avatarActualId);
+            renderAvatarSelector(perfil, avatarActualId);
         }
 
         // --- 5. LÓGICA DE CONDECORACIONES ---
@@ -398,7 +672,10 @@ function checkUser() {
 
         // --- NUEVO: ACTUALIZACIÓN DEL AVATAR EN LA BARRA DE NAVEGACIÓN ---
         if (document.getElementById('nav-avatar')) {
-            document.getElementById('nav-avatar').src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}`;
+            // Buscamos el avatar real usando el ID guardado localmente
+            const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+            const av = todos.find(a => a.id === String(data.avatar_id || '1'));
+            document.getElementById('nav-avatar').src = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}`;
         }
 
         // LÓGICA DE ACCESO A MODERACIÓN (Admin y Dueño)
@@ -437,23 +714,32 @@ function cerrarModalNormas() {
     if (modal) modal.style.display = 'none';
 }
 
-async function renderAvatarSelector(nivelUsuario, avatarActualId) {
+async function renderAvatarSelector(perfil, avatarActualId) {
     const grid = document.getElementById('avatar-selector-grid');
     if (!grid) return;
     grid.innerHTML = "";
 
-    AVATARES_RANGOS.forEach(av => {
-        const esDesbloqueado = nivelUsuario >= av.minLvl;
+    const comprados = perfil.avatares_comprados || [];
+    const nivelUsuario = perfil.nivel;
+
+    // Combinamos las listas para el selector
+    const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+
+    todos.forEach(av => {
+        // Un avatar es elegible si: es de nivel y tienes el nivel, O si está en la lista de comprados
+        const esDeNivel = AVATARES_RANGOS.some(r => r.id === av.id);
+        const esDesbloqueado = (esDeNivel && nivelUsuario >= av.minLvl) || comprados.includes(av.id);
         const esSeleccionado = avatarActualId === av.id;
 
         const img = document.createElement('img');
         img.src = av.img;
         img.className = `avatar-option ${esDesbloqueado ? 'unlocked' : 'locked'} ${esSeleccionado ? 'selected' : ''}`;
+        img.style = `width:60px; height:60px; border-radius:50%; border: 2px solid ${esSeleccionado ? 'var(--gold)' : '#333'}; padding:2px; cursor:pointer; opacity:${esDesbloqueado ? '1' : '0.3'};`;
         
         if (esDesbloqueado) {
             img.onclick = () => cambiarAvatar(av.id, av.img);
         } else {
-            img.onclick = () => alert(`Necesitas Nivel ${av.minLvl} para desbloquear este avatar.`);
+            img.onclick = () => goldAlert({ title: "BLOQUEADO", text: esDeNivel ? `Necesitas Nivel ${av.minLvl}` : "Debes comprar este avatar en la Tienda", icon: "🔒" });
         }
         
         grid.appendChild(img);
@@ -482,6 +768,13 @@ async function cambiarAvatar(id, url) {
             .eq('nombre', currentUser);
 
         if (error) throw error;
+
+        // Actualizamos el almacenamiento local para que al recargar se mantenga
+        const data = JSON.parse(localStorage.getItem('aidume_profile'));
+        if (data) {
+            data.avatar_id = id;
+            localStorage.setItem('aidume_profile', JSON.stringify(data));
+        }
 
         // Actualizamos las imágenes en tiempo real
         if (document.getElementById('user-avatar')) document.getElementById('user-avatar').src = url;
@@ -546,12 +839,28 @@ async function verPerfilAjeno(nombreUsuario) {
     const win = document.getElementById('chat-window');
     if (win) win.style.display = 'none';
 
-    // 2. Cambiamos a la pestaña de perfil manualmente
-    // OJO: No usamos showPage('perfil') aquí para evitar el bucle de carga automática
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
-    document.getElementById('perfil').classList.add('active-page');
+    // 2. ¡FUNDAMENTAL!: Cerramos la vista de detalles del anime.
+    // Esto elimina el overlay que bloqueaba la visibilidad del perfil.
+    hideDetails();
 
-    // 3. Llamamos a la carga con el nombre del otro usuario
+    // 3. Cambiamos a la pestaña de perfil manualmente
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
+    const perfilPage = document.getElementById('perfil');
+    if (perfilPage) perfilPage.classList.add('active-page');
+
+    // 4. Actualizamos el estado visual de los botones de navegación (Dorado)
+    document.querySelectorAll('.nav-item').forEach(n => {
+        n.classList.remove('active');
+        const clickAction = n.getAttribute('onclick') || "";
+        if (clickAction.includes("'perfil'") || clickAction.includes('"perfil"')) {
+            n.classList.add('active');
+        }
+    });
+
+    // 5. Aseguramos que el scroll suba al inicio del perfil
+    window.scrollTo(0, 0);
+
+    // 6. Llamamos a la carga con el nombre del otro usuario
     actualizarPerfilDesdeSQL(nombreUsuario);
 }
 

@@ -10,6 +10,8 @@
     
     <link rel="stylesheet" href="style.css">
 
+    <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
     </head>
 <body>
     <header>
@@ -31,11 +33,22 @@
     
     <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
 
-    <div id="captcha-container" style="display: none; margin-bottom: 15px; background: rgba(255,215,0,0.05); padding: 10px; border-radius: 10px; border: 1px dashed var(--gold);">
-        <p style="font-size: 0.7rem; color: var(--gold); margin-bottom: 5px;">CAPTCHA</p>
-        <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
-            <span id="captcha-text" style="font-weight: bold; letter-spacing: 3px; background: #222; padding: 5px 10px; border-radius: 5px; color: #fff; user-select: none;"></span>
-            <input type="text" id="reg-captcha-input" placeholder="Código" class="modern-input" style="width: 80px; text-align: center; padding: 5px;">
+    <div id="notif-req-container" class="notif-requirement-card" style="display: none;">
+        <label class="custom-checkbox" style="margin: 0;">
+            <input type="checkbox" id="reg-notif-check">
+            <span class="checkmark"></span>
+        </label>
+        <span style="color: var(--gold); font-size: 0.65rem; font-weight: 900; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px;">
+            Activar Radar de Estrenos (Requisito de Oro)
+        </span>
+    </div>
+
+    <div id="captcha-container" class="captcha-gold-card" style="display: none;">
+        <p class="captcha-gold-header">🛡️ VERIFICACIÓN DE ORO</p>
+        <div class="captcha-gold-controls">
+            <span id="captcha-text" class="captcha-gold-display"></span>
+            <input type="text" id="reg-captcha-input" placeholder="Código" class="captcha-gold-input modern-input">
+            <button type="button" id="captcha-refresh-btn" class="captcha-refresh-btn">🔄</button>
         </div>
     </div>
 </div>
@@ -157,6 +170,7 @@
         <div class="profile-stats-row">
             <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
             <div class="stat-item"><span class="stat-label">Tiempo</span><span class="stat-value" id="stat-horas">0h</span></div>
+            <div class="stat-item"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
             <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
         </div>
 
@@ -171,6 +185,10 @@
             <div class="xp-container-pro"><div id="xp-bar" class="xp-bar-fill"></div></div>
         </div>
     </div>
+
+    <button onclick="abrirTienda()" class="btn-normas" style="border-color: #00d4ff; color: #00d4ff; background: rgba(0, 212, 255, 0.05); margin-bottom: 10px;">
+        🛒 TIENDA DE ORO
+    </button>
 
     <button onclick="abrirModalNormas()" class="btn-normas">
     📜 VER REGLAMENTO DE LA COMUNIDAD
@@ -197,6 +215,76 @@
         </div>
     </div>
 
+    <div id="modal-tienda" class="modal-gold-overlay" style="display:none;">
+        <div class="modal-gold-card" style="max-width: 450px; width: 95%;">
+            <h3 class="section-title-gold centered">💎 TIENDA AIDUME</h3>
+            
+            <!-- Sección Premium -->
+            <div class="store-item-card-premium">
+                <div style="flex:1">
+                    <h4 style="color:var(--gold); margin:0; font-size:1rem;">RANGO PREMIUM</h4>
+                    <p style="color:#aaa; font-size:0.7rem; margin:5px 0;">Sin anuncios, sin esperas y corona dorada.</p>
+                    <span style="color:#fff; font-weight:bold; font-size:1.1rem;">$4.00 USD</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:5px;">
+                    <button onclick="mostrarCheckoutTarjeta()" class="action-btn" style="margin:0; width:auto; padding: 8px 12px; font-size:0.65rem;">💳 TARJETA</button>
+                    <button onclick="mostrarCheckoutInterno()" class="btn-random-gold" style="margin:0; width:auto; padding: 6px 10px; font-size:0.6rem; border-color:rgba(255,215,0,0.4);">🏦 TRANSFERENCIA</button>
+                </div>
+            </div>
+
+            <!-- Panel de Pago con Tarjeta (Checkout Transparente) -->
+            <div id="checkout-tarjeta" style="display:none; margin-top:15px; padding:18px; background:#0a0a0a; border:1.5px solid var(--gold); border-radius:15px; animation: slideUp 0.3s ease; box-shadow: 0 0 25px rgba(255,215,0,0.1);">
+                <h4 style="color:var(--gold); margin:0 0 15px 0; font-size:0.85rem; text-align:center;">💳 PAGO SEGURO CIFRADO</h4>
+                
+                <div class="input-group-admin">
+                    <div class="card-input-wrapper">
+                        <input type="text" id="card-number" placeholder="0000 0000 0000 0000" class="modern-input" maxlength="19" style="width:100%; box-sizing:border-box;">
+                        <i class="fas fa-credit-card"></i>
+                    </div>
+                    <input type="text" id="card-name" placeholder="NOMBRE COMO FIGURA EN TARJETA" class="modern-input" style="width:100%; box-sizing:border-box; text-transform:uppercase;">
+                    
+                    <div class="card-form-grid">
+                        <input type="text" id="card-expiry" placeholder="MM/AA" class="modern-input" maxlength="5" style="width:100%; box-sizing:border-box; text-align:center;">
+                        <input type="password" id="card-cvc" placeholder="CVC" class="modern-input" maxlength="4" style="width:100%; box-sizing:border-box; text-align:center;">
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <button onclick="procesarPagoTarjeta()" id="btn-pagar-tarjeta" class="btn-filter-flv" style="flex:2; height:auto; padding:12px;">PAGAR $4.00 USD</button>
+                    <button onclick="document.getElementById('checkout-tarjeta').style.display='none'" class="btn-random-gold" style="flex:1; margin:0;">X</button>
+                </div>
+                <p style="font-size:0.55rem; color:#666; margin-top:10px; text-align:center;">🔒 Tus datos están protegidos por AiduMe</p>
+            </div>
+
+            <!-- Panel de Pago Interno (Checkout Gold) -->
+            <div id="checkout-interno" style="display:none; margin-top:15px; padding:15px; background:#000; border:1px solid var(--gold); border-radius:12px; animation: slideUp 0.3s ease;">
+                <h4 style="color:var(--gold); margin:0 0 10px 0; font-size:0.8rem;">🏦 DATOS DE TRANSFERENCIA</h4>
+                <div style="background:rgba(255,215,0,0.05); padding:10px; border-radius:8px; font-family:monospace; font-size:0.75rem; color:#fff; text-align:left; border:1px dashed rgba(255,215,0,0.3);">
+                    <p style="margin:2px 0;"><strong>TITULAR:</strong> TU NOMBRE</p>
+                    <p style="margin:2px 0;"><strong>CBU:</strong> 0000000000000000000000</p>
+                    <p style="margin:2px 0;"><strong>ALIAS:</strong> AIDUME.PREMIUM.GOLD</p>
+                    <p style="margin:2px 0;"><strong>VALOR:</strong> $4.00 USD (Aprox. $4000 ARS)</p>
+                </div>
+                
+                <p style="font-size:0.65rem; color:#888; margin:10px 0;">Una vez transferido, pega el <b>ID de Transacción</b> o número de control aquí:</p>
+                <input type="text" id="pago-referencia" placeholder="Ej: 823456789" class="modern-input" style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:10px; border-radius:8px;">
+                
+                <div style="display:flex; gap:10px;">
+                    <button onclick="enviarComprobantePago()" class="btn-filter-flv" style="flex:2; height:auto; padding:10px;">VERIFICAR PAGO</button>
+                    <button onclick="document.getElementById('checkout-interno').style.display='none'" class="btn-random-gold" style="flex:1; margin:0;">VOLVER</button>
+                </div>
+            </div>
+
+            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🎭 AVATARES EXCLUSIVOS</h4>
+            <div id="tienda-avatares-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+
+            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">✨ SKINS PARA CHAT</h4>
+            <div id="tienda-temas-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+
+            <button onclick="cerrarTienda()" class="action-btn" style="margin-top: 20px; background: #222; color: white; border: 1px solid #444;">Cerrar</button>
+        </div>
+    </div>
+
     <div id="modal-bio" class="modal-gold-overlay" style="display:none;">
     <div class="modal-gold-card">
         <h3 class="section-title-gold centered">📝 TU FRASE DE ORO</h3>
@@ -206,16 +294,6 @@
             <button onclick="guardarNuevaBio()" class="btn-filter-flv" style="flex:1;">GUARDAR</button>
             <button onclick="cerrarModalBio()" class="btn-random-gold" style="flex:1; margin:0; border-color:#888; color:#888;">CANCELAR</button>
         </div>
-    </div>
-</div>
-
-<input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
-
-<div id="captcha-container" style="display: none; margin-bottom: 15px; background: rgba(255,215,0,0.05); padding: 10px; border-radius: 10px; border: 1px dashed var(--gold);">
-    <p style="font-size: 0.7rem; color: var(--gold); margin-bottom: 5px;">SISTEMA ANTI-BOT</p>
-    <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
-        <span id="captcha-text" style="font-weight: bold; letter-spacing: 3px; background: #222; padding: 5px 10px; border-radius: 5px; color: #fff; user-select: none;"></span>
-        <input type="text" id="reg-captcha-input" placeholder="Código" class="modern-input" style="width: 80px; text-align: center; padding: 5px;">
     </div>
 </div>
 
