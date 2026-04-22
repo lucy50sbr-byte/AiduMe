@@ -13,6 +13,7 @@ async function initApp() {
     cargarUltimosEpisodios();
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
+    activarNotificacionesEnVivo();
 }
 
 async function cargarHome() {
@@ -2377,6 +2378,51 @@ window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confi
         if(showInput) setTimeout(() => input.focus(), 50);
     });
 };
+
+function activarNotificacionesEnVivo() {
+    // Nos suscribimos a inserciones en la tabla de episodios
+    _db.channel('public:enlaces_episodios')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'enlaces_episodios' }, async (payload) => {
+        const nuevoEp = payload.new;
+        
+        // Para que la notificación sea "Gold", necesitamos el nombre del anime (Jikan)
+        try {
+            const res = await fetch(`https://api.jikan.moe/v4/anime/${nuevoEp.anime_id}`);
+            const json = await res.json();
+            const nombreAnime = json.data.title;
+            const imagen = json.data.images.jpg.image_url;
+
+            lanzarNotificacionSistema(
+                `¡NUEVO EPISODIO! 🏆`,
+                `${nombreAnime} - Episodio ${nuevoEp.episodio_num} ya disponible en AiduMe.`,
+                imagen
+            );
+        } catch (e) {
+            // Si falla Jikan, enviamos una genérica
+            lanzarNotificacionSistema(`¡NUEVO ESTRENO! ⚡`, `Se ha subido el episodio ${nuevoEp.episodio_num} de un nuevo anime.`);
+        }
+    })
+    .subscribe();
+}
+
+function lanzarNotificacionSistema(titulo, cuerpo, imagen) {
+    if (Notification.permission === "granted") {
+        const opciones = {
+            body: cuerpo,
+            icon: imagen || 'logo-grande.png',
+            badge: 'logo-grande.png',
+            vibrate: [200, 100, 200],
+            silent: false
+        };
+        
+        // Sonido y vibración Gold
+        const n = new Notification(titulo, opciones);
+        n.onclick = () => {
+            window.focus();
+            n.close();
+        };
+    }
+}
 
 // Mantener tus disparadores vinculados a la nueva función
 function buscarAnime() { buscarAnimeFusion(); }

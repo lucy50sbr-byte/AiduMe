@@ -56,12 +56,6 @@ header {
 .page { display: none; padding: 15px; padding-bottom: 100px; max-width: 800px; margin: auto; min-height: 100vh; }
 .active-page { display: block; }
 
-/*.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; width: 100%; margin-top: 10px; }
-.card { background: var(--card); border-radius: 15px; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); cursor: pointer; }
-.card img { width: 100%; height: 200px; object-fit: cover; }
-.card-title { padding: 10px; font-size: 0.75rem; text-align: center; font-weight: bold; }
-*/
-
 .pill-container { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; margin-bottom: 10px; scrollbar-width: none; }
 .pill-container::-webkit-scrollbar { display: none; }
 .pill { background: var(--card); border: 1px solid rgba(255,255,255,0.1); padding: 8px 18px; border-radius: 20px; font-size: 0.8rem; white-space: nowrap; cursor: pointer; }
@@ -367,10 +361,12 @@ header {
 
 /* --- ESTILO ÚNICO DE TARJETA (Póster Vertical) --- */
 .card {
-    width: 130px; /* Ancho idéntico para todos */
-    cursor: pointer;
-    transition: transform 0.3s ease;
-    flex-shrink: 0; /* Evita que el Top 10 las aplaste */
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 2px solid var(--gold); /* Tu borde dorado */
+    /* Añadimos esto para asegurar que el borde mande */
+    z-index: 1; 
 }
 
 .card img {
@@ -1695,16 +1691,17 @@ header {
 /* Estilo base de la etiqueta (Ribbon) */
 .status-tag {
     position: absolute;
-    top: 8px;
-    right: -28px; /* La movemos a la derecha */
+    top: 8px;   /* Baja un poco el top si ves que toca el borde superior */
+    right: -32px; /* Prueba ajustando este valor */
     padding: 2px 30px;
-    font-size: 0.65rem;
-    font-weight: bold;
-    color: white;
-    text-transform: uppercase;
-    transform: rotate(45deg); /* La inclinamos */
-    z-index: 5;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    
+    /* El truco: un z-index menor al borde si fuera necesario, 
+       o simplemente asegurar que no toque el limite exacto */
+    z-index: 0; 
+    
+    transform: rotate(45deg);
+    /* Evita que el fondo de la etiqueta se "coma" el borde */
+    pointer-events: none; 
 }
 
 /* Color Verde para Emisión */
@@ -1723,4 +1720,48 @@ header {
 .status-tag.proximamente {
     background: #3498db; /* Azul deportivo */
     border-bottom: 1px solid rgba(255,255,255,0.3);
+}
+
+/* --- SISTEMA DE DIÁLOGOS GOLD (MODAL DINÁMICO) --- */
+.gold-alert-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 10000; /* Siempre por encima de todo */
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+.gold-alert-card {
+    background: #111;
+    border: 2px solid var(--gold);
+    padding: 25px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.15);
+}
+
+.gold-alert-input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 20px;
+    background: #1a1a1a;
+    border: 1px solid var(--gold);
+    border-radius: 8px;
+    color: white;
+    outline: none;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.gold-alert-input:focus {
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
 }

@@ -159,15 +159,23 @@ function checkUser() {
 window.onload = checkUser;
 
 function cerrarSesion() {
-    if(confirm("¿Cerrar sesión?")) {
+    async function ejecutarCierre() {
+        const confirmar = await goldAlert({
+            title: "CERRAR SESIÓN",
+            text: "¿Estás seguro de que deseas salir?",
+            icon: "🚪",
+            showCancel: true,
+            confirmText: "SÍ, SALIR"
+        });
+
+        if (confirmar) {
         localStorage.clear();
-        
-        // Esto asegura que desaparezca antes de recargar
         const chatBubble = document.getElementById('chat-bubble');
         if (chatBubble) chatBubble.style.display = 'none';
-
         location.reload();
+        }
     }
+    ejecutarCierre();
 }
 
 // Agrega esto al final de auth.js o ui.js
@@ -177,13 +185,13 @@ function solicitarPermisoNotificaciones() {
         return;
     }
 
-    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
-        Notification.requestPermission().then(permission => {
-            if (permission === "granted") {
-                console.log("¡Permiso de notificaciones concedido!");
-            }
-        });
-    }
+    Notification.requestPermission().then(permission => {
+        if (permission === "granted" && 'serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').then(() => {
+                console.log("Service Worker de Oro registrado.");
+            });
+        }
+    });
 }
 
 let captchaActual = "";
