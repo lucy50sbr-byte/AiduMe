@@ -1461,6 +1461,24 @@ header {
     transition: transform 0.3s ease;
 }
 
+/* --- BADGE DE NOTIFICACIONES EN CHAT --- */
+#chat-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #ff4444;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    border: 2px solid #111;
+    display: none; /* Se activa por JS */
+}
+
+/* Resaltado de mención */
+.chat-mention-me { background: rgba(255, 215, 0, 0.2); border: 1px solid var(--gold); border-radius: 4px; padding: 0 2px; font-weight: bold; }
+
 #chat-bubble:hover {
     transform: scale(1.1); /* Efecto visual al pasar el mouse */
 }
@@ -1966,3 +1984,225 @@ header {
     border: 1.5px solid #2ecc71 !important; 
     box-shadow: inset 0 0 15px rgba(46, 204, 113, 0.2) !important;
 }
+
+/* --- TEMAS GLOBALES DE VENTANA DE CHAT --- */
+#chat-window.chat-theme-neon { border-color: #00d4ff; box-shadow: 0 0 25px rgba(0, 212, 255, 0.4); }
+#chat-window.chat-theme-neon #chat-messages { background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('https://w0.peakpx.com/wallpaper/719/547/wallpaper-cyberpunk-edgerunners-lucy-cyberpunk-edgerunners-cyberpunk-2077.jpg') center/cover no-repeat !important; }
+
+#chat-window.chat-theme-sakura { border-color: #ff85a1; box-shadow: 0 0 25px rgba(255, 133, 161, 0.4); }
+#chat-window.chat-theme-sakura #chat-messages { background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('https://wallpapercave.com/wp/wp5260580.jpg') center/cover no-repeat !important; }
+
+#chat-window.chat-theme-inferno { border-color: #ff4500; box-shadow: 0 0 25px rgba(255, 69, 0, 0.4); }
+#chat-window.chat-theme-inferno #chat-messages { background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('https://images.alphacoders.com/112/1125219.jpg') center/cover no-repeat !important; }
+
+#chat-window.chat-theme-emerald { border-color: #2ecc71; box-shadow: 0 0 25px rgba(46, 204, 113, 0.4); }
+#chat-window.chat-theme-emerald #chat-messages { background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('https://images7.alphacoders.com/613/613926.jpg') center/cover no-repeat !important; }
+
+/* Efecto de suavizado para el cambio de fondo */
+#chat-messages { transition: background 0.5s ease; }
+
+/* --- BOTÓN WATCH PARTY --- */
+.btn-watch-party {
+    background: linear-gradient(45deg, #6a11cb, #2575fc);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 10px;
+    box-shadow: 0 4px 15px rgba(37, 117, 252, 0.3);
+}
+
+/* --- CHAT TRANSPARENTE WATCH PARTY --- */
+.wp-chat-overlay {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 220px;
+    height: 180px;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+#wp-msg-list {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    scrollbar-width: none;
+}
+
+.wp-msg-item { font-size: 0.75rem; color: white; line-height: 1.2; word-wrap: break-word; }
+.wp-msg-item b { color: var(--gold); }
+
+.wp-input-area { display: flex; padding: 5px; gap: 5px; background: rgba(255,255,255,0.05); border-radius: 0 0 12px 12px; }
+.wp-input-area input { flex: 1; background: transparent; border: none; color: white; font-size: 0.7rem; outline: none; padding: 4px; }
+.wp-input-area button { background: var(--gold); border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.7rem; font-weight: bold; }
+
+#wp-msg-list::-webkit-scrollbar { display: none; }
+
+/* --- ESTILOS SISTEMA AMIGOS --- */
+.friend-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 10px 15px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 215, 0, 0.1);
+}
+
+.priv-msg-row { font-size: 0.85rem; padding: 6px 10px; border-radius: 8px; max-width: 85%; word-wrap: break-word; }
+.priv-msg-me { background: var(--gold); color: black; align-self: flex-end; border-bottom-right-radius: 2px; }
+.priv-msg-them { background: #333; color: white; align-self: flex-start; border-bottom-left-radius: 2px; }
+
+/* Iconos de Visto y Online */
+.seen-icon { font-size: 0.65rem; margin-left: 4px; opacity: 0.6; font-weight: bold; }
+.seen-icon.visto { color: #00d4ff; } /* Azul celeste para el doble check */
+.online-dot { width: 8px; height: 8px; background: #2ecc71; border-radius: 50%; display: inline-block; margin-right: 6px; box-shadow: 0 0 5px #2ecc71; }
+.offline-dot { width: 8px; height: 8px; background: #7f8c8d; border-radius: 50%; display: inline-block; margin-right: 6px; }
+
+#privado-mensajes::-webkit-scrollbar { width: 4px; }
+#privado-mensajes::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 10px; }
+
+/* Badge para la navegación inferior (Contador de Amigos) */
+.nav-badge-gold {
+    position: absolute;
+    top: 5px;
+    right: 25%; /* Ajustado para quedar sobre el icono/avatar */
+    background: #ff4444;
+    color: white;
+    font-size: 0.65rem;
+    font-weight: bold;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: none; /* Se activa dinámicamente */
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid #000;
+    box-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+    z-index: 1001;
+}
+
+/* Estilos para el botón de búsqueda por voz */
+#btn-voice-search {
+    background: none;
+    border: none;
+    color: var(--gold);
+    font-size: 1.2rem;
+    cursor: pointer;
+    margin-right: 10px;
+    display: flex;
+    align-items: center;
+    transition: 0.3s;
+}
+
+#btn-voice-search.recording {
+    color: #ff4444; /* Rojo durante grabación */
+    animation: pulseMic 1.5s infinite;
+}
+
+@keyframes pulseMic {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.5; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* --- RANKING ESTILO UFA --- */
+.ranking-container {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    border-radius: 15px;
+    padding: 20px;
+    margin-top: 30px;
+    text-align: left;
+}
+
+.ranking-item {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: 0.3s;
+}
+
+.ranking-item:hover {
+    background: rgba(255, 215, 0, 0.05);
+}
+
+.ranking-pos {
+    font-weight: 900;
+    color: var(--gold);
+    font-size: 1.1rem;
+    width: 40px;
+}
+
+.ranking-info {
+    flex: 1;
+}
+
+.ranking-title {
+    font-size: 0.85rem;
+    font-weight: bold;
+    display: block;
+}
+
+.ranking-votes {
+    font-size: 0.7rem;
+    opacity: 0.5;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.winner-card-ufa {
+    background: radial-gradient(circle at center, rgba(255, 215, 0, 0.15) 0%, transparent 70%);
+    padding: 40px 20px;
+    border-radius: 25px;
+    border: 2px solid var(--gold);
+    text-align: center;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.2);
+}
+
+/* --- SISTEMA DE RACHAS --- */
+.racha-item {
+    display: inline-block;
+    align-items: center;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.racha-tag-text {
+    font-size: 0.65rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    
+    /* Efecto de Brillo sobre el Texto (Sin recuadro) */
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: text-shine-sweep 3s linear infinite;
+    display: inline-block;
+}
+
+@keyframes text-shine-sweep {
+    to { background-position: 200% center; }
+}
+
+/* Tiers de Rachas */
+.racha-aspirante .racha-tag-text { background-image: linear-gradient(90deg, #666, #ccc, #666); }
+.racha-maldad .racha-tag-text { background-image: linear-gradient(90deg, #8e44ad, #df80ff, #8e44ad); }
+.racha-devil .racha-tag-text { background-image: linear-gradient(90deg, #c0392b, #ff4d4d, #c0392b); }
+.racha-demon .racha-tag-text { background-image: linear-gradient(90deg, #111, #ff0000, #111); }
+.racha-overlord .racha-tag-text { background-image: linear-gradient(90deg, #000, var(--gold), #000); }

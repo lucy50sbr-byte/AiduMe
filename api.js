@@ -3,6 +3,9 @@ let duelAnimes = [];
 let paginaActualTodos = 1;
 let idiomaActual = 'sub';
 let ultimoEpisodioCargado = null;
+let privateChatSubscription = null; // Variable global para la suscripción al chat privado
+let chatAmigoActual = null; // Usuario con el que se chatea en privado
+let wpChatChannel = null; // Canal de chat temporal
 
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
@@ -15,12 +18,34 @@ async function initApp() {
     cargarGenerosEnPanel();
     activarNotificacionesEnVivo();
     iniciarContadorOnline();
+    cargarRankingSemanal();
     verificarPagoAutomatico();
+    verificarRachaDias();
+    
+    // --- ESTADO ONLINE ---
+    actualizarEstadoConexion(); 
+    setInterval(actualizarEstadoConexion, 60000); // Actualiza cada 1 min
+    
+    setInterval(cargarUltimosEpisodios, 600000); // Refresca episodios cada 10 min
+    setInterval(cargarHome, 604800000); // Actualización automática del Top 10 cada semana (7 días)
+
+    escucharSolicitudesAmistad();
+    actualizarNotificacionesPerfil(); 
+    escucharNotificacionesGlobales();
+
+    // Auto-abrir anime desde notificación
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get('openAnime');
+    if (openId) {
+        // Limpiamos la URL para que no se repita al recargar
+        window.history.replaceState(null, null, window.location.pathname);
+        showDetails({ mal_id: parseInt(openId) });
+    }
 }
 
 async function cargarHome() {
     // Cambia esto en cargarHome() para que sea el Top de la Temporada Actual
-const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=12&order_by=members&sort=desc');
+const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=10&order_by=members&sort=desc');
     const j = await r.json();
     renderGrid(j.data, 'lista');
 }
@@ -264,6 +289,336 @@ async function reportarFalla(numEpisodio, nombreAnime) {
     }
 }
 
+/** --- SISTEMA DE AMIGOS Y CHAT PRIVADO --- **/
+
+async function enviarSolicitudAmistad(usuarioDestino) {
+    if (!currentUser) return;
+    if (currentUser.trim().toLowerCase() === usuarioDestino.trim().toLowerCase()) return;
+
+    const { error } = await _db.from('amistades').insert([
+        { usuario_envia: currentUser.trim(), usuario_recibe: usuarioDestino.trim(), estado: 'pendiente' }
+    ]);
+    if (error) {
+        console.error("Error al enviar solicitud:", error.message);
+        if (error.code === '23505') { // Código de error para violación de restricción única
+            goldAlert({ title: "SOLICITUD PENDIENTE", text: "Ya existe una solicitud de amistad o ya son amigos.", icon: "📨" });
+        } else {
+            goldAlert({ title: "ERROR", text: "No se pudo enviar la solicitud: " + error.message, icon: "❌" });
+        }
+    } else {
+        goldAlert({ title: "SOLICITUD ENVIADA", text: `Has invitado a @${usuarioDestino} a ser tu amigo.`, icon: "✨" });
+        actualizarPerfilDesdeSQL(usuarioDestino);
+    }
+}
+
+/**
+ * Escucha en tiempo real si alguien envía una solicitud al usuario actual
+ */
+function escucharSolicitudesAmistad() {
+    if (!currentUser) return;
+
+    _db.channel('amistades-radar')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'amistades' }, payload => {
+        const s = payload.new;
+        // Comprobamos si la solicitud es para mí
+        if (s.usuario_recibe.trim().toLowerCase() === currentUser.trim().toLowerCase() && s.estado === 'pendiente') {
+            reproducirSonidoAnime();
+            goldAlert({
+                title: "NUEVA SOLICITUD",
+                text: `@${s.usuario_envia} quiere ser tu amigo.`,
+                icon: "👥"
+            });
+            // Si el usuario está viendo su propio perfil, refrescamos la lista automáticamente
+            const seccionAmigos = document.getElementById('seccion-amigos-perfil');
+            if (seccionAmigos && seccionAmigos.style.display !== 'none') {
+                actualizarPerfilDesdeSQL();
+            }
+        }
+    }).subscribe();
+}
+
+async function gestionarSolicitud(id, accion, nombreOtro) {
+    if (accion === 'aceptar') {
+        await _db.from('amistades').update({ estado: 'aceptada' }).eq('id', id);
+        goldAlert({ title: "¡NUEVO AMIGO!", text: `Ahora puedes chatear privado con @${nombreOtro}`, icon: "🤝" });
+    } else {
+        await _db.from('amistades').delete().eq('id', id);
+    }
+    actualizarPerfilDesdeSQL();
+}
+
+async function cargarChatPrivado(amigo) {
+    chatAmigoActual = amigo;
+    if (!currentUser || !amigo) return;
+
+    document.getElementById('privado-titulo').innerText = `💬 @${amigo}`;
+    document.getElementById('modal-chat-privado').style.display = 'flex';
+    
+    const u1 = String(currentUser).trim();
+    const u2 = String(amigo).trim();
+
+    // --- MARCAR COMO LEÍDOS AL ABRIR ---
+    await _db.from('chat_privado')
+        .update({ leido: true })
+        .eq('emisor', u2)
+        .eq('receptor', u1)
+        .eq('leido', false);
+
+    // Si el perfil está abierto, refrescamos para que el badge de este amigo desaparezca
+    const seccionAmigos = document.getElementById('seccion-amigos-perfil');
+    if (seccionAmigos && seccionAmigos.style.display !== 'none') {
+        actualizarPerfilDesdeSQL();
+    }
+    actualizarNotificacionesPerfil();
+
+    // Cargar mensajes previos
+    const { data } = await _db.from('chat_privado')
+        .select('*')
+        .or(`and(emisor.ilike."${u1}",receptor.ilike."${u2}"),and(emisor.ilike."${u2}",receptor.ilike."${u1}")`)
+        .order('fecha', { ascending: true });
+
+    renderizarMensajesPrivados(data || []);
+    escucharChatPrivado();
+}
+
+function renderizarMensajesPrivados(mensajes) {
+    const cont = document.getElementById('privado-mensajes');
+    cont.innerHTML = mensajes.map(m => {
+        const esMio = String(m.emisor).trim().toLowerCase() === String(currentUser).trim().toLowerCase();
+        
+        // Icono de visto solo para mis mensajes (siempre se muestra)
+        const checkIcon = esMio 
+            ? `<span class="seen-icon ${m.leido ? 'visto' : ''}">${m.leido ? '✔️✔️' : '✔️'}</span>` 
+            : '';
+
+        return `
+            <div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">
+                ${m.mensaje} ${checkIcon}
+            </div>`;
+    }).join('');
+    cont.scrollTop = cont.scrollHeight;
+}
+
+async function enviarMensajePrivado() {
+    const input = document.getElementById('privado-input');
+    const texto = input.value.trim();
+    if (!texto || !chatAmigoActual || !currentUser) return;
+
+    const { error } = await _db.from('chat_privado').insert([
+        { emisor: currentUser.trim(), receptor: chatAmigoActual.trim(), mensaje: texto }
+    ]);
+
+    if (!error) {
+        input.value = "";
+    } else {
+        console.error("Error enviando mensaje privado:", error);
+        goldAlert({ title: "ERROR", text: "No pudimos enviar el mensaje. Revisa tu conexión.", icon: "❌" });
+    }
+}
+
+function escucharChatPrivado() {
+    const uActual = String(currentUser).trim();
+
+    // Si ya hay una suscripción, la removemos para evitar duplicados
+    if (privateChatSubscription) {
+        _db.removeChannel(privateChatSubscription);
+        privateChatSubscription = null;
+        console.log("📡 Desuscrito del canal privado anterior.");
+    }
+
+    privateChatSubscription = _db.channel('canal-privado-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_privado' }, async (payload) => {
+        const m = payload.new;
+        const receptor = String(m.receptor).trim();
+        const emisor = String(m.emisor).trim();
+        const amigo = String(chatAmigoActual).trim();
+
+        console.log("📡 Evento de chat privado recibido:", payload.eventType, m);
+
+        // 1. LÓGICA DE NUEVO MENSAJE (INSERT)
+        if (payload.eventType === 'INSERT') {
+            if ((emisor === uActual && receptor === amigo) || (emisor === amigo && receptor === uActual)) {
+                
+                // Si yo soy el receptor y tengo el chat abierto, marcar como leído inmediatamente
+                if (receptor === uActual && document.getElementById('modal-chat-privado').style.display === 'flex') {
+                    console.log("✔️ Marcando mensaje como leído:", m.id);
+                    await _db.from('chat_privado').update({ leido: true }).eq('id', m.id);
+                }
+
+                // Vibrar si el mensaje es para mí y el chat NO está abierto
+                if (receptor === uActual && document.getElementById('modal-chat-privado').style.display !== 'flex' && navigator.vibrate) {
+                    console.log("📳 Vibrando por nuevo mensaje.");
+                    navigator.vibrate(200); 
+
+                    // Si el perfil está abierto, refrescamos para mostrar el badge de no leídos en tiempo real
+                    const seccionAmigos = document.getElementById('seccion-amigos-perfil');
+                    if (seccionAmigos && seccionAmigos.style.display !== 'none') {
+                        actualizarPerfilDesdeSQL();
+                    }
+                }
+
+                // OPTIMIZACIÓN: En lugar de re-consultar toda la DB, solo agregamos el mensaje si el chat está abierto
+                if (document.getElementById('modal-chat-privado').style.display === 'flex') {
+                    const cont = document.getElementById('privado-mensajes');
+                    const esMio = emisor === uActual;
+                    const checkIcon = esMio ? `<span class="seen-icon ${m.leido ? 'visto' : ''}">${m.leido ? '✔️✔️' : '✔️'}</span>` : '';
+                    cont.innerHTML += `<div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">${m.mensaje} ${checkIcon}</div>`;
+                    cont.scrollTop = cont.scrollHeight;
+                }
+            }
+        } 
+        
+        // 2. LÓGICA DE ACTUALIZACIÓN (UPDATE) -> Para el "Visto" en tiempo real
+        // Solo actualizamos si el mensaje que cambió a leído es MÍO y el receptor es mi amigo actual
+        if (payload.eventType === 'UPDATE' && emisor === uActual && receptor === amigo && m.leido === true) {
+            console.log("👁️ Mensaje mío marcado como visto:", m.id);
+            // Si mi mensaje cambió a leído, actualizamos la vista para ver el check azul
+            const { data } = await _db.from('chat_privado').select('*')
+                .or(`and(emisor.eq."${uActual}",receptor.eq."${amigo}"),and(emisor.eq."${amigo}",receptor.eq."${uActual}")`) // Aseguramos comillas
+                .order('fecha', { ascending: true });
+            renderizarMensajesPrivados(data || []);
+        }
+    }).subscribe();
+}
+
+function cerrarChatPrivado() {
+    document.getElementById('modal-chat-privado').style.display = 'none';
+    chatAmigoActual = null;
+    // Desuscribirse del canal privado al cerrar el chat
+    if (privateChatSubscription) {
+        _db.removeChannel(privateChatSubscription);
+        privateChatSubscription = null;
+        console.log("📡 Desuscrito del canal privado.");
+    }
+}
+
+/**
+ * Actualiza el "latido" del usuario para el estado Online
+ */
+async function actualizarEstadoConexion() {
+    if (!currentUser) return;
+    const { error } = await _db.from('perfiles')
+        .update({ ultima_conexion: new Date().toISOString() }) 
+        .ilike('nombre', currentUser.trim())
+        .select(); // Forzamos a que devuelva datos para confirmar el cambio
+
+    if (error) console.error("Error al actualizar estado de conexión:", error);
+    else {
+        console.log("🟢 Latido (Heartbeat) enviado para:", currentUser);
+    }
+}
+
+async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
+    const seccion = document.getElementById('seccion-amigos-perfil');
+    const grid = document.getElementById('lista-amigos-u');
+    if (!seccion || !grid) return;
+
+    if (esMismoUsuario) {
+        seccion.style.display = 'block';
+        const myUser = currentUser.trim();
+        const { data: solicitudes } = await _db.from('amistades').select('*').ilike('usuario_recibe', myUser).eq('estado', 'pendiente');
+        const { data: amigos1 } = await _db.from('amistades').select('usuario_recibe').ilike('usuario_envia', myUser).eq('estado', 'aceptada');
+        const { data: amigos2 } = await _db.from('amistades').select('usuario_envia').ilike('usuario_recibe', myUser).eq('estado', 'aceptada');
+
+        console.log("👥 Solicitudes pendientes:", solicitudes);
+
+        let html = "";
+        if (solicitudes?.length > 0) {
+            html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold;">SOLICITUDES PENDIENTES:</p>`;
+            solicitudes.forEach(s => {
+                html += `
+                <div class="friend-item">
+                    <span style="font-size:0.8rem;">@${s.usuario_envia}</span>
+                    <div style="display:flex; gap:5px;">
+                        <button onclick="gestionarSolicitud(${s.id}, 'aceptar', '${s.usuario_envia}')" class="btn-random-gold" style="padding:4px 8px; margin:0;">✔️</button>
+                        <button onclick="gestionarSolicitud(${s.id}, 'rechazar')" class="btn-random-gold" style="padding:4px 8px; margin:0; border-color:red; color:red;">❌</button>
+                    </div>
+                </div>`;
+            });
+        }
+
+        const nombresAmigos = [...new Set([...(amigos1?.map(a => a.usuario_recibe) || []), ...(amigos2?.map(a => a.usuario_envia) || [])])];
+        console.log("🤝 Nombres de amigos:", nombresAmigos);
+        
+        // --- MEJORA: CONTADOR DE MENSAJES NO LEÍDOS ---
+        const { data: noLeidosData } = await _db.from('chat_privado')
+            .select('emisor')
+            .ilike('receptor', myUser)
+            .eq('leido', false);
+        
+        const conteoNoLeidos = (noLeidosData || []).reduce((acc, m) => {
+            const emisorNorm = String(m.emisor).trim().toLowerCase();
+            acc[emisorNorm] = (acc[emisorNorm] || 0) + 1;
+            return acc;
+        }, {});
+
+        // Traer estados de conexión de los amigos
+        let estados = [];
+        if (nombresAmigos.length > 0) {
+            // Usamos .in() para traer a todos los amigos de una sola vez
+            const res = await _db.from('perfiles').select('nombre, ultima_conexion').in('nombre', nombresAmigos);
+            estados = res.data || [];
+        }
+
+        console.log("🌐 Estados de conexión de amigos:", estados);
+        if (nombresAmigos.length > 0) {
+            html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold; margin-top:10px;">MIS AMIGOS:</p>`;
+            nombresAmigos.forEach(amigo => {
+                const dataEst = estados?.find(e => e.nombre.toLowerCase() === amigo.toLowerCase());
+                
+                // Obtener mensajes no leídos de este amigo
+                const numNoLeidos = conteoNoLeidos[amigo.toLowerCase()] || 0;
+                const badgeNoLeidos = numNoLeidos > 0 ? `<span style="background:#ff4444; color:white; border-radius:50%; padding:2px 7px; font-size:0.65rem; font-weight:bold; margin-left:8px; box-shadow: 0 0 5px rgba(255,0,0,0.5);">${numNoLeidos}</span>` : '';
+
+                let esOnline = false;
+                let etiquetaTiempo = "Offline";
+
+                if (dataEst && dataEst.ultima_conexion) {
+                    // Parseamos la fecha de Supabase asegurando que se trate como UTC
+                    const ultimaConexion = new Date(dataEst.ultima_conexion).getTime();
+                    const ahora = Date.now();
+                    
+                    // Usamos Math.abs para ignorar si un reloj está adelantado respecto al otro
+                    const diferenciaMs = Math.abs(ahora - ultimaConexion);
+                    
+                    // Si la diferencia es menor a 5 minutos (300,000 ms), está Online
+                    esOnline = diferenciaMs < 300000;
+
+                    if (esOnline) {
+                        etiquetaTiempo = "Online";
+                    } else {
+                        // Calculamos el tiempo relativo real
+                        const diffMins = Math.floor(diferenciaMs / 60000);
+                        if (diffMins < 60) etiquetaTiempo = `Hace ${diffMins} min`;
+                        else if (diffMins < 1440) etiquetaTiempo = `Hace ${Math.floor(diffMins / 60)}h`;
+                        else etiquetaTiempo = `Hace ${Math.floor(diffMins / 1440)}d`;
+                    }
+                }
+                
+                html += `
+                <div class="friend-item">
+                    <div onclick="verPerfilAjeno('${amigo}')" style="cursor:pointer; font-size:0.8rem; display:flex; align-items:center;">
+                        <span class="${esOnline ? 'online-dot' : 'offline-dot'}"></span>
+                        @${amigo} 
+                        ${badgeNoLeidos}
+                        <small style="font-size:0.6rem; opacity:0.5; margin-left:5px;">(${etiquetaTiempo})</small>
+                    </div>
+                    <button onclick="cargarChatPrivado('${amigo}')" class="btn-random-gold" style="padding:4px 8px; margin:0;">💬 Chat</button>
+                </div>`;
+            });
+        } else if (solicitudes?.length === 0) {
+            html = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Aún no tienes amigos agregados.</p>";
+        }
+        grid.innerHTML = html;
+    } else {
+        seccion.style.display = 'none';
+    }
+}
+
+
+
+
+
 // FUNCIÓN AUXILIAR PARA EL CHECKBOX (Agrégala también en api.js)
 /**
  * Guarda el anime en la lista de "Vistos recientemente" del historial.
@@ -277,7 +632,7 @@ async function saveHistory(a) {
             titulo: a.title,
             imagen_url: a.images.jpg.image_url,
             fecha_visto: new Date().toISOString()
-        }, { onConflict: 'usuario_nombre, anime_id' });
+        }, { onConflict: 'usuario_nombre, anime_id' }); // Considera que en la DB el constraint debe ser case-insensitive si es posible
     } catch (err) {
         console.error("❌ Error al guardar historial reciente:", err);
     }
@@ -290,7 +645,7 @@ async function ganarRecompensaGold({ xp = 0, fichas = 0, silencioso = true }) {
         const { data: perfil, error } = await _db
             .from('perfiles')
             .select('xp, nivel, aidufichas')
-            .eq('nombre', currentUser)
+            .ilike('nombre', currentUser)
             .single();
 
         if (error) throw error;
@@ -313,7 +668,7 @@ async function ganarRecompensaGold({ xp = 0, fichas = 0, silencioso = true }) {
             xp: nuevaXP, 
             nivel: nuevoNivel, 
             aidufichas: nuevasFichas 
-        }).eq('nombre', currentUser);
+        }).ilike('nombre', currentUser);
 
         if (typeof actualizarPerfilDesdeSQL === 'function') actualizarPerfilDesdeSQL();
     } catch (err) {
@@ -373,7 +728,7 @@ async function updateListButton() {
     const { data: existe } = await _db
         .from('favoritos')
         .select('*')
-        .eq('usuario_nombre', currentUser)
+        .ilike('usuario_nombre', currentUser)
         .eq('anime_id', currentAnime.mal_id)
         .maybeSingle();
 
@@ -382,7 +737,7 @@ async function updateListButton() {
         b.classList.add('in-list'); 
         b.onclick = async () => {
             await _db.from('favoritos').delete()
-                .eq('usuario_nombre', currentUser)
+                .ilike('usuario_nombre', currentUser)
                 .eq('anime_id', currentAnime.mal_id);
             updateListButton(); 
         };
@@ -409,7 +764,7 @@ async function rateAnime(stars) {
         const { data: yaVoto } = await _db
             .from('valoraciones')
             .select('estrellas')
-            .eq('usuario_nombre', currentUser)
+            .ilike('usuario_nombre', currentUser)
             .eq('anime_id', currentAnime.mal_id)
             .maybeSingle();
 
@@ -579,45 +934,73 @@ async function votarDuelo(index) {
     const semanaActual = getWeekNumber(new Date());
 
     try {
-        // 1. Verificar votos reales en Supabase
-        const { count, error: errCheck } = await _db
-            .from('torneo_votos')
-            .select('*', { count: 'exact', head: true })
-            .eq('usuario_nombre', currentUser)
-            .eq('semana_voto', semanaActual);
+        // 1. Verificar límites de votos y obtener saldo actual de fichas
+        const [resVotos, resPerfil] = await Promise.all([
+            _db.from('torneo_votos')
+                .select('*', { count: 'exact', head: true })
+                .eq('usuario_nombre', currentUser)
+                .eq('semana_voto', semanaActual),
+            _db.from('perfiles')
+                .select('aidufichas')
+                .ilike('nombre', currentUser)
+                .single()
+        ]);
 
-        // --- REEMPLAZO DEL ALERT DE LÍMITE ---
-        if (count >= 3) {
+        if (resVotos.count >= 3) {
             return goldAlert({
                 title: "LÍMITE ALCANZADO",
-                text: "¡Ya usaste tus 3 votos semanales! Vuelve la próxima semana para seguir apoyando a tus favoritos.",
-                icon: "🚫",
-                confirmText: "ENTENDIDO"
+                text: "¡Ya usaste tus 3 votos semanales!",
+                icon: "🚫"
             });
         }
 
-        // 2. Insertar nuevo voto
+        const misFichas = resPerfil.data?.aidufichas || 0;
+
+        // 2. PEDIR APUESTA (Usando Gold Alert con Input)
+        const montoApuesta = await goldAlert({
+            title: "APOSTAR AIDUFICHAS",
+            text: `¿Cuántas fichas quieres apostar por ${duelAnimes[index].title}?\n(Tienes: ${misFichas} 💰)`,
+            icon: "🎲",
+            showInput: true,
+            showCancel: true,
+            confirmText: "APOSTAR Y VOTAR"
+        });
+
+        if (montoApuesta === null) return; // Canceló
+
+        const apuestaInt = parseInt(montoApuesta) || 0;
+        if (apuestaInt < 0) return goldAlert({ text: "La apuesta no puede ser negativa.", icon: "❌" });
+        if (apuestaInt > misFichas) {
+            return goldAlert({ title: "SALDO INSUFICIENTE", text: "No tienes suficientes Aidufichas para esta apuesta.", icon: "📉" });
+        }
+
+        // 3. Registrar voto con la apuesta
         const { error: errInsert } = await _db
             .from('torneo_votos')
             .insert([{
                 usuario_nombre: currentUser,
                 anime_id: duelAnimes[index].mal_id,
                 anime_titulo: duelAnimes[index].title,
-                semana_voto: semanaActual
+                semana_voto: semanaActual,
+                apuesta: apuestaInt
             }]);
 
         if (errInsert) throw errInsert;
 
-        // --- REEMPLAZO DEL ALERT DE ÉXITO ---
+        // 4. Descontar fichas del perfil
+        if (apuestaInt > 0) {
+            await ganarRecompensaGold({ fichas: -apuestaInt, silencioso: true });
+        }
+
         goldAlert({
-            title: "VOTO REGISTRADO",
-            text: `¡Has apoyado a ${duelAnimes[index].title}! Tu voto ha sido sumado al marcador global.`,
-            icon: "🏆",
-            confirmText: "¡A POR LA VICTORIA!"
+            title: "APUESTA REALIZADA",
+            text: `Has apostado ${apuestaInt} fichas por ${duelAnimes[index].title}. ¡Si gana al final de la semana, duplicarás tu premio!`,
+            icon: "🔥"
         });
 
         await actualizarMarcadorGlobal();
         await actualizarVotosUI();
+        cargarRankingSemanal();
         
     } catch (err) {
         console.error("Error al votar:", err.message);
@@ -651,6 +1034,136 @@ async function actualizarVotosUI() {
     });
 }
 
+/**
+ * Verifica y actualiza la racha de días consecutivos
+ */
+async function verificarRachaDias() {
+    if (!currentUser) return;
+    try {
+        const { data: perfil } = await _db.from('perfiles').select('racha_dias, ultima_racha_fecha').ilike('nombre', currentUser).single();
+        if (!perfil) return;
+
+        const hoy = new Date();
+        const fechaHoyStr = hoy.toISOString().split('T')[0]; 
+        const ultimaFecha = perfil.ultima_racha_fecha;
+
+        if (ultimaFecha === fechaHoyStr) return; // Ya entró hoy
+
+        let nuevaRacha = 1;
+        if (ultimaFecha) {
+            const dUltima = new Date(ultimaFecha + 'T12:00:00');
+            const dHoy = new Date(fechaHoyStr + 'T12:00:00');
+            const diffDias = Math.round((dHoy - dUltima) / (1000 * 60 * 60 * 24));
+
+            if (diffDias === 1) {
+                nuevaRacha = (perfil.racha_dias || 0) + 1;
+            } else if (diffDias > 1) {
+                nuevaRacha = 1; // Racha rota por olvido
+                goldAlert({ title: "RACHA ROTA", text: "Has perdido tu racha de días. ¡Vuelve a empezar de cero!", icon: "🥀" });
+            }
+        }
+
+        await _db.from('perfiles').update({ 
+            racha_dias: nuevaRacha, 
+            ultima_racha_fecha: fechaHoyStr 
+        }).ilike('nombre', currentUser);
+
+        if (nuevaRacha > 1 && nuevaRacha % 5 === 0) {
+            goldAlert({ title: "¡RACHA IMPARABLE!", text: `¡Llevas ${nuevaRacha} días seguidos en AiduMe! Tu poder aumenta.`, icon: "🔥" });
+        }
+    } catch (e) { console.error("Error en racha:", e); }
+}
+
+/**
+ * Devuelve el HTML de la etiqueta de racha según los días
+ */
+function obtenerHtmlRacha(dias) {
+    if (!dias || dias < 1) return "";
+    let texto = "Aspirante";
+    let clase = "racha-aspirante";
+
+    if (dias >= 3 && dias < 7) { texto = "Maldad"; clase = "racha-maldad"; }
+    else if (dias >= 7 && dias < 15) { texto = "Devil"; clase = "racha-devil"; }
+    else if (dias >= 15 && dias < 30) { texto = "Demon"; clase = "racha-demon"; }
+    else if (dias >= 30) { texto = "Overlord"; clase = "racha-overlord"; }
+    
+    return `<span class="racha-item ${clase}" title="Racha de ${dias} días">🔥 <span class="racha-tag-text">${texto} ${dias}</span></span>`;
+}
+
+/**
+ * Carga y muestra el ranking semanal de animes (Lunes-Sábado) 
+ * y revela al ganador los Domingos (Estilo UFA).
+ */
+async function cargarRankingSemanal() {
+    const ahora = new Date();
+    const diaSemana = ahora.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
+    const semanaActual = getWeekNumber(ahora);
+    
+    const battleSection = document.getElementById('battle-section');
+    if (!battleSection) return;
+
+    let rankingCont = document.getElementById('ranking-torneo-container');
+    if (!rankingCont) {
+        rankingCont = document.createElement('div');
+        rankingCont.id = 'ranking-torneo-container';
+        battleSection.appendChild(rankingCont);
+    }
+
+    try {
+        const { data: votos, error } = await _db
+            .from('torneo_votos')
+            .select('anime_id, anime_titulo')
+            .eq('semana_voto', semanaActual);
+
+        if (error) throw error;
+
+        const conteo = votos.reduce((acc, v) => {
+            if (!acc[v.anime_id]) acc[v.anime_id] = { id: v.anime_id, titulo: v.anime_titulo, votos: 0 };
+            acc[v.anime_id].votos++;
+            return acc;
+        }, {});
+
+        const listaRanking = Object.values(conteo).sort((a, b) => b.votos - a.votos).slice(0, 5);
+
+        if (diaSemana === 0) { // DOMINGO: MODO GANADOR
+            const ganador = listaRanking[0];
+            const battleItems = document.querySelector('.battle-items');
+            const battleStatus = document.getElementById('battle-timer');
+            const votosRestantes = document.getElementById('votos-restantes')?.closest('p');
+            
+            if (battleItems) battleItems.style.display = 'none';
+            if (battleStatus) battleStatus.innerHTML = "👑 EL REY DE LA SEMANA 👑";
+            if (votosRestantes) votosRestantes.style.display = 'none';
+
+            rankingCont.innerHTML = `
+                <div class="winner-card-ufa">
+                    <div style="font-size:3.5rem; margin-bottom:15px; filter: drop-shadow(0 0 10px gold);">🏆</div>
+                    <h2 style="color:var(--gold); font-size:1.8rem; margin:10px 0; text-transform:uppercase; letter-spacing:2px;">
+                        ${ganador?.titulo || "Calculando..."}
+                    </h2>
+                    <p style="color:#eee; font-size:1rem; opacity:0.8;">
+                        Se corona campeón con <b>${ganador?.votos || 0}</b> votos de la comunidad.
+                    </p>
+                    <div style="margin-top:20px; font-size:0.7rem; color:var(--gold); opacity:0.5; letter-spacing:3px;">
+                        EL NUEVO TORNEO COMIENZA MAÑANA (LUNES)
+                    </div>
+                </div>`;
+        } else { // LUNES A SÁBADO: MODO RANKING
+            rankingCont.className = 'ranking-container';
+            let rankingHtml = `<h3 style="color:var(--gold); font-size:0.75rem; text-align:center; margin-bottom:15px; letter-spacing:2px; font-weight:900;">📊 RANKING GLOBAL DE LA SEMANA</h3><div id="ranking-torneo-lista">`;
+            if (listaRanking.length === 0) {
+                rankingHtml += `<p style="text-align:center; opacity:0.4; font-size:0.8rem; padding:10px;">Aún no hay votos registrados esta semana.</p>`;
+            } else {
+                listaRanking.forEach((item, index) => {
+                    rankingHtml += `<div class="ranking-item"><div class="ranking-pos">${index + 1}</div><div class="ranking-info"><span class="ranking-title">${item.titulo}</span><span class="ranking-votes">${item.votos} VOTOS REGISTRADOS</span></div><div style="color:var(--gold); font-size:1.2rem;">${index === 0 ? '🔥' : ''}</div></div>`;
+                });
+            }
+            rankingHtml += `</div>`;
+            rankingCont.innerHTML = rankingHtml;
+        }
+    } catch (e) { console.error("Error al cargar ranking estilo UFA:", e); }
+}
+
 // Función necesaria para calcular la semana (ISO Week)
 function getWeekNumber(d) {
     d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -662,7 +1175,7 @@ function getWeekNumber(d) {
 
 async function verificarGanadorSemanal() {
     const ahora = new Date();
-    if (ahora.getDay() !== 6) return; // Solo ejecutar los Sábados
+    if (ahora.getDay() !== 0) return; // Solo ejecutar los Domingos
 
     const semanaActual = getWeekNumber(ahora);
     
@@ -869,94 +1382,146 @@ function renderizarComentarios(comentarios, contenedor) {
 }
 
 async function cargarCalendario() {
-    const r = await fetch('https://api.jikan.moe/v4/schedules'); 
-    const j = await r.json();
     const c = document.getElementById('lista-calendario'); 
     if (!c) return;
     
-    c.innerHTML = `
-        <div style="background: rgba(255, 215, 0, 0.1); border: 1px dashed var(--gold); padding: 10px; border-radius: 10px; margin-bottom: 20px; font-size: 0.75rem; text-align: center; color: var(--gold);">
-            ⚠️ Horarios en <strong>JST (Japón)</strong>. 
-            <br>La campana 🔔 programa el aviso en tu <strong>hora local</strong>.
-        </div>
-    `;
+    const cacheKey = 'aidume_calendar_cache_v2'; // Nueva versión para Anilist
+    const cachedData = localStorage.getItem(cacheKey);
 
-    const diasEsp = {
-        'mondays': 'Lunes', 'tuesdays': 'Martes', 'wednesdays': 'Miércoles',
-        'thursdays': 'Jueves', 'fridays': 'Viernes', 'saturdays': 'Sábado', 'sundays': 'Domingo'
-    };
+    if (cachedData) {
+        renderizarHtmlCalendario(JSON.parse(cachedData));
+    } else {
+        c.innerHTML = "<p style='text-align:center; color:var(--gold); padding:20px;'>Cargando programación semanal...</p>";
+    }
 
-    const ahora = new Date();
-    const horaActual = ahora.getHours();
-    const minutoActual = ahora.getMinutes();
+    // Query de Anilist para obtener los próximos 50 episodios que saldrán en los próximos 7 días
+    const query = `
+    query ($start: Int, $end: Int) {
+      Page(perPage: 40) {
+        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+          airingAt
+          episode
+          media {
+            idMal
+            title { romaji english native }
+            coverImage { large }
+            description
+            status
+            episodes
+          }
+        }
+      }
+    }`;
 
-    j.data.forEach(a => {
-        if (!a.broadcast || !a.broadcast.time) return;
+    const now = Math.floor(Date.now() / 1000);
+    const nextWeek = now + (7 * 24 * 60 * 60);
 
-        const diaIngles = a.day ? a.day.toLowerCase() : 'unknown';
-        const hoyIngles = ahora.toLocaleDateString('en-US', {weekday: 'long'}).toLowerCase() + 's';
-        
-        // --- LÓGICA DE CÁLCULO DE FECHA ---
-        const diasSemana = ['sundays', 'mondays', 'tuesdays', 'wednesdays', 'thursdays', 'fridays', 'saturdays'];
-        const indiceObjetivo = diasSemana.indexOf(diaIngles);
-        const indiceHoy = ahora.getDay();
-        
-        // Calculamos cuántos días faltan para ese estreno
-        let diferenciaDias = (indiceObjetivo - indiceHoy + 7) % 7;
-        
-        // Si es el mismo día pero la hora ya pasó, mostramos la fecha de la próxima semana
-        const [horaE, minE] = a.broadcast.time.split(':').map(Number);
-        if (diferenciaDias === 0 && (horaE < horaActual || (horaE === horaActual && minE < minutoActual))) {
-            diferenciaDias = 7;
+    try {
+        const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ query, variables: { start: now, end: nextWeek } })
+        });
+
+        if (!res.ok) {
+            const errorBody = await res.text(); // Capturamos el cuerpo de la respuesta de error
+            throw new Error(`Error de conexión con Anilist: ${res.status} ${res.statusText || ''} - ${errorBody}`);
         }
 
-        // Crear el objeto de fecha para el estreno
-        const fechaEstreno = new Date();
-        fechaEstreno.setDate(ahora.getDate() + diferenciaDias);
-        
-        const diaMes = fechaEstreno.getDate().toString().padStart(2, '0');
-        const mes = (fechaEstreno.getMonth() + 1).toString().padStart(2, '0');
-        const fechaFinal = `${diasEsp[diaIngles]} ${diaMes}/${mes}`;
+        const json = await res.json();
+        const schedules = json.data.Page.airingSchedules;
 
-        // Solo mostramos si no es un estreno que ya pasó hoy (para mantener el calendario limpio)
-        if (diferenciaDias >= 0) {
-            const d = document.createElement('div'); 
-            d.className = "calendario-item";
-            d.style = "background:var(--card); margin-bottom:10px; border-radius:15px; display:flex; padding:10px; align-items:center; cursor:pointer;";
-            
-            d.innerHTML = `
-                <img src="${a.images.jpg.image_url}" width="50" style="border-radius:10px; margin-right:12px;">
-                <div style="flex:1;">
-                    <strong style="font-size:0.9rem;">${a.title}</strong><br>
-                    <small style="color:var(--gold); font-weight:bold;">
-                        ${fechaFinal} • ${a.broadcast.time} 
-                        <span style="font-size:0.6rem; opacity:0.7; background:rgba(255,255,255,0.1); padding:2px 4px; border-radius:4px; margin-left:5px;">JST</span>
-                    </small>
-                </div>
-                <button class="btn-notif" style="background:none; border:1px solid var(--gold); color:var(--gold); border-radius:10px; padding:5px 10px;">🔔</button>
-            `;
+        // Adaptamos Anilist al formato MAL-like que usa el resto de tu App
+        const dataAdaptada = schedules.map(s => ({
+            mal_id: s.media.idMal,
+            title: s.media.title.romaji || s.media.title.english,
+            titles: [
+                { type: 'Default', title: s.media.title.romaji },
+                { type: 'English', title: s.media.title.english }
+            ],
+            images: { jpg: { large_image_url: s.media.coverImage.large, image_url: s.media.coverImage.large } },
+            synopsis: s.media.description,
+            episodes: s.media.episodes,
+            status: s.media.status === 'RELEASING' ? 'Currently Airing' : 'Finished',
+            airingAt: s.airingAt, // Info vital para la fecha local
+            episode_number: s.episode
+        }));
 
-            const btn = d.querySelector('.btn-notif');
-            btn.onclick = (e) => {
-                e.stopPropagation();
-                agendarNotificacion(a.title, a.images.jpg.image_url, a.broadcast.time, diaIngles);
-                btn.innerHTML = '✅';
-                btn.style.borderColor = '#4CAF50';
-                btn.style.color = '#4CAF50';
-            };
+        localStorage.setItem(cacheKey, JSON.stringify(dataAdaptada));
+        renderizarHtmlCalendario(dataAdaptada);
 
-            d.onclick = () => showDetails(a); 
-            c.appendChild(d);
+    } catch (e) {
+        console.error("Fallo al cargar calendario desde Anilist:", e); // Usamos console.error para errores reales
+        if (!cachedData) {
+            c.innerHTML = `
+                <div style="text-align:center; padding:30px;">
+                    <p style="color:#ff4444; margin-bottom:15px; font-size:0.8rem;">⚠️ ${e.message}</p>
+                    <button onclick="cargarCalendario()" class="btn-random-gold">🔄 REINTENTAR CARGAR</button>
+                </div>`;
         }
-    });
-
-    if (c.children.length === 1) {
-        c.innerHTML += "<p style='text-align:center; opacity:0.5; padding:20px;'>No hay más estrenos confirmados.</p>";
     }
 }
 
-async function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
-    // 1. REEMPLAZO DEL ALERT DE PERMISO
+function renderizarHtmlCalendario(data) {
+    const c = document.getElementById('lista-calendario');
+    if (!c) return;
+
+    let html = `<div style="background: rgba(255, 215, 0, 0.1); border: 1px dashed var(--gold); padding: 10px; border-radius: 10px; margin-bottom: 20px; font-size: 0.75rem; text-align: center; color: var(--gold);">
+        🚀 Radar Gold (Anilist) • Horarios en tu <strong>hora local</strong>.
+    </div>`;
+
+    if (!data || data.length === 0) {
+        c.innerHTML = html + "<p style='text-align:center; opacity:0.5; padding:20px;'>No hay estrenos programados.</p>";
+        return;
+    }
+
+    // 1. Agrupar los animes por día de la semana
+    const grupos = {};
+    data.forEach(a => {
+        const d = new Date(a.airingAt * 1000);
+        const diaNombre = d.toLocaleDateString('es-ES', { weekday: 'long' });
+        const diaNum = d.getDate().toString().padStart(2, '0');
+        const mesNum = (d.getMonth() + 1).toString().padStart(2, '0');
+        const diaKey = `${diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1)} ${diaNum}/${mesNum}`;
+        
+        if (!grupos[diaKey]) grupos[diaKey] = [];
+        grupos[diaKey].push(a);
+    });
+
+    // 2. Generar el HTML con el sistema de acordeón
+    Object.keys(grupos).forEach(dia => {
+        const animes = grupos[dia];
+        html += `
+            <div class="dia-calendario-header" onclick="const list = this.nextElementSibling; list.style.display = list.style.display === 'none' ? 'block' : 'none'; this.querySelector('span').innerText = list.style.display === 'none' ? '${animes.length} ANIMES ▾' : '${animes.length} ANIMES ▴';" 
+                 style="background:rgba(255,215,0,0.1); border:1px solid var(--gold); padding:15px; border-radius:12px; margin-bottom:10px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                <strong style="color:var(--gold); text-transform:uppercase; font-size:0.9rem; letter-spacing:1px;">📅 ${dia}</strong>
+                <span style="color:var(--gold); font-size:0.7rem; font-weight:bold;">${animes.length} ANIMES ▾</span>
+            </div>
+            <div class="dia-calendario-lista" style="display:none; margin-bottom:20px; padding:0 5px;">`;
+        
+        animes.forEach(a => {
+            const horaLocal = new Date(a.airingAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const animeJson = JSON.stringify(a).replace(/"/g, '&quot;').replace(/'/g, "&#39;");
+            const tituloLimpio = a.title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+            html += `
+                <div class="calendario-item" onclick="showDetails(${animeJson})" style="background:var(--card); margin-bottom:8px; border-radius:15px; display:flex; padding:10px; align-items:center; cursor:pointer; border:1px solid rgba(255,215,0,0.05);">
+                    <img src="${a.images.jpg.image_url}" width="45" style="border-radius:10px; margin-right:12px;">
+                    <div style="flex:1;">
+                        <strong style="font-size:0.85rem; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">${a.title}</strong>
+                        <small style="color:var(--gold); font-weight:bold;">${horaLocal} • Episodio ${a.episode_number}</small>
+                    </div>
+                    <button class="btn-notif" onclick="event.stopPropagation(); agendarNotificacionAnilist('${tituloLimpio}', '${a.images.jpg.image_url}', ${a.airingAt}, ${a.mal_id})" style="background:none; border:1px solid var(--gold); color:var(--gold); border-radius:10px; padding:5px 10px;">🔔</button>
+                </div>
+            `;
+        });
+        html += `</div>`;
+    });
+
+    c.innerHTML = html;
+}
+
+function agendarNotificacionAnilist(titulo, imagen, airingAt, animeId) {
     if (Notification.permission !== "granted") {
         return goldAlert({
             title: "NOTIFICACIONES",
@@ -965,37 +1530,15 @@ async function agendarNotificacion(titulo, imagen, horaJST, diaSemanaIngles) {
             confirmText: "ENTENDIDO"
         });
     }
-
-    // --- Lógica de cálculo de tiempo (se mantiene igual) ---
-    const [hora, minutos] = horaJST.split(':').map(Number);
-    const ahora = new Date();
     
-    let fechaEstreno = new Date();
-    fechaEstreno.setUTCHours(hora - 9, minutos, 0, 0); 
+    const tiempoRestante = (airingAt * 1000) - Date.now();
+    if (tiempoRestante <= 0) return goldAlert({ text: "Este episodio ya se emitió.", icon: "📺" });
 
-    const dias = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const objetivo = dias.indexOf(diaSemanaIngles.replace('s', ''));
-    let hoy = ahora.getUTCDay();
-    
-    let diasDiferencia = (objetivo - hoy + 7) % 7;
-    fechaEstreno.setUTCDate(ahora.getUTCDate() + diasDiferencia);
-
-    if (fechaEstreno < ahora) {
-        fechaEstreno.setUTCDate(fechaEstreno.getUTCDate() + 7);
-    }
-
-    const tiempoRestante = fechaEstreno.getTime() - ahora.getTime();
-
-    // 5. Programar el aviso
     setTimeout(() => {
-        new Notification("¡Estreno en AiduMe!", {
-            body: `¡Es hora! Ya salió el nuevo episodio de: ${titulo}`,
-            icon: imagen
-        });
+        lanzarNotificacionSistema("¡Estreno en AiduMe!", `¡Es hora! Ya salió: ${titulo}`, imagen, animeId);
     }, tiempoRestante);
 
-    // --- REEMPLAZO DEL ALERT DE ÉXITO (MÁS ÉPICO) ---
-    const horaLocal = fechaEstreno.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const horaLocal = new Date(airingAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
     goldAlert({
         title: "RECORDATORIO FIJADO",
@@ -1080,7 +1623,7 @@ async function limpiarHistorialUsuario() {
             const { error } = await _db
                 .from('vistos')
                 .delete()
-                .eq('usuario_nombre', currentUser);
+                .ilike('usuario_nombre', currentUser);
 
             if (error) throw error;
 
@@ -1119,7 +1662,7 @@ async function checkUserRating(animeId) {
         const { data, error } = await _db
             .from('valoraciones')
             .select('estrellas')
-            .eq('usuario_nombre', currentUser)
+            .ilike('usuario_nombre', currentUser)
             .eq('anime_id', animeId)
             .maybeSingle();
 
@@ -1174,11 +1717,37 @@ async function aplicarFiltrosAvanzados() {
     const status = document.getElementById('filter-status').value;
     const order = document.getElementById('filter-order').value;
     
-    const lista = document.getElementById('lista');
-    lista.innerHTML = "<p style='text-align:center; color:var(--gold);'>Filtrando contenido...</p>";
+    // 1. Referencias a los contenedores principales
+    const seccionTop10 = document.getElementById('seccion-top-10');
+    const seccionRecientes = document.getElementById('seccion-ultimos-episodios');
+    const paginacionNormal = document.getElementById('paginacion-container');
+    const listaTodos = document.getElementById('lista-todos');
 
-    // Construimos la URL quitando el límite de 12 para que traiga más
-    let url = `https://api.jikan.moe/v4/anime?order_by=${order}&sort=desc`;
+    const headerTodos = listaTodos ? listaTodos.previousElementSibling : null;
+    const tituloTodos = headerTodos ? headerTodos.querySelector('.section-h') : null;
+
+    // 2. Ocultamos las secciones destacadas para que no estorben
+    if (seccionTop10) seccionTop10.style.display = 'none';
+    if (seccionRecientes) seccionRecientes.style.display = 'none';
+    if (paginacionNormal) paginacionNormal.style.display = 'none';
+
+    // 3. Estilo Gold para el título y cargador
+    if (tituloTodos) {
+        tituloTodos.innerHTML = `✨ RESULTADOS DEL RADAR GOLD`;
+        tituloTodos.style.color = 'var(--gold)';
+    }
+
+    if (listaTodos) {
+        listaTodos.innerHTML = `
+            <div style="width:100%; text-align:center; padding:60px 20px; animation: slideUp 0.5s ease;">
+                <div style="font-size:3rem; margin-bottom:20px; animation: pulseGold 1.5s infinite;">🔍</div>
+                <p style="color:var(--gold); font-weight:900; letter-spacing:2px; text-transform:uppercase; font-size:0.75rem;">
+                    Sincronizando con la Base de Datos Maestra...
+                </p>
+            </div>`;
+    }
+
+    let url = `https://api.jikan.moe/v4/anime?order_by=${order}&sort=desc&limit=24`;
     
     if (genre) url += `&genres=${genre}`;
     if (status) url += `&status=${status}`;
@@ -1186,9 +1755,26 @@ async function aplicarFiltrosAvanzados() {
     try {
         const r = await fetch(url);
         const j = await r.json();
-        renderGrid(j.data, 'lista');
+
+        if (j.data && j.data.length > 0) {
+            renderGrid(j.data, 'lista-todos');
+        } else {
+            listaTodos.innerHTML = `
+                <div style="text-align:center; padding:40px; width:100%;">
+                    <p style="opacity:0.5; color:#888;">No se detectaron animes en este cuadrante del radar.</p>
+                    <button onclick="location.reload()" class="btn-random-gold" style="margin-top:20px;">RESETEAR RADAR</button>
+                </div>`;
+        }
+
+        const pBusquedaExistente = document.getElementById('paginacion-busqueda');
+        if (pBusquedaExistente) pBusquedaExistente.remove();
     } catch (e) {
         console.error("Error al filtrar:", e);
+        goldAlert({
+            title: "FALLO EN EL RADAR",
+            text: "No pudimos conectar con la biblioteca central.",
+            icon: "❌"
+        });
     }
 }
 
@@ -1320,8 +1906,8 @@ async function suspenderUsuarioDinamico() {
 // Función principal de sanción actualizada
 async function aplicarSancion(user, horas) {
     try {
-        const { data: moderador } = await _db.from('perfiles').select('rol').eq('nombre', currentUser).single();
-        const { data: objetivo } = await _db.from('perfiles').select('rol').eq('nombre', user).single();
+        const { data: moderador } = await _db.from('perfiles').select('rol').ilike('nombre', currentUser).single();
+        const { data: objetivo } = await _db.from('perfiles').select('rol').ilike('nombre', user).single();
 
         if (!objetivo) return goldAlert({ title: "ERROR", text: "El usuario objetivo no existe en la base de datos.", icon: "❌" });
 
@@ -1329,7 +1915,7 @@ async function aplicarSancion(user, horas) {
         if (objetivo.rol === 'dueño') {
             if (moderador.rol === 'admin') {
                 const fechaKarma = new Date('2099-01-01').toISOString();
-                await _db.from('perfiles').update({ baneado_hasta: fechaKarma }).eq('nombre', currentUser);
+                await _db.from('perfiles').update({ baneado_hasta: fechaKarma }).ilike('nombre', currentUser);
                 
                 await goldAlert({ 
                     title: "TRAICIÓN DETECTADA", 
@@ -1367,7 +1953,7 @@ async function aplicarSancion(user, horas) {
         const { error } = await _db
             .from('perfiles')
             .update({ baneado_hasta: fechaBaneo })
-            .eq('nombre', user);
+            .ilike('nombre', user);
 
         if (error) throw error;
         
@@ -1672,7 +2258,7 @@ async function reportarComentario(comId) {
             .from('reportes')
             .select('id')
             .eq('comentario_id', comId)
-            .eq('usuario_reporta', currentUser)
+            .ilike('usuario_reporta', currentUser)
             .maybeSingle();
 
         if (errCheck) throw errCheck;
@@ -1755,7 +2341,7 @@ async function guardarNuevaBio() {
         const { error } = await _db
             .from('perfiles')
             .update({ bio: textoFinal })
-            .eq('nombre', currentUser);
+            .ilike('nombre', currentUser);
 
         if (error) throw error;
 
@@ -1772,18 +2358,17 @@ async function guardarNuevaBio() {
 async function cargarTodosLosAnimes(page) {
     const contenedor = document.getElementById('lista-todos');
     const labelPagina = document.getElementById('page-number-all');
+    const paginacion = document.getElementById('paginacion-container');
     
     if (contenedor) {
         contenedor.innerHTML = "<p style='width:100%; text-align:center; color:var(--gold); opacity:0.5;'>Sincronizando biblioteca...</p>";
     }
 
     try {
-        // Traemos 30 resultados por página ordenados por popularidad
         const r = await fetch(`https://api.jikan.moe/v4/anime?page=${page}&limit=24&order_by=popularity&sort=asc`);
         const j = await r.json();
 
         if (j.data) {
-            // Usamos la función renderGrid que ya aplica el diseño de oro
             renderGrid(j.data, 'lista-todos'); 
             
             paginaActualTodos = page;
@@ -1791,9 +2376,22 @@ async function cargarTodosLosAnimes(page) {
             
             // Control visual de botones
             const btnPrev = document.getElementById('btn-prev-all');
+            const btnNext = document.getElementById('btn-next-all');
+
             if (btnPrev) {
                 btnPrev.style.opacity = page === 1 ? "0.3" : "1";
                 btnPrev.style.pointerEvents = page === 1 ? "none" : "auto";
+            }
+            if (btnNext) {
+                const hasNext = j.pagination && j.pagination.has_next_page;
+                btnNext.style.opacity = hasNext ? "1" : "0.3";
+                btnNext.style.pointerEvents = hasNext ? "auto" : "none";
+            }
+
+            // Mostrar el contenedor solo si hay más de una página
+            if (paginacion) {
+                const totalPages = j.pagination ? j.pagination.last_visible_page : 1;
+                paginacion.style.display = (totalPages > 1) ? "flex" : "none";
             }
         }
     } catch (err) {
@@ -2043,13 +2641,238 @@ async function guardarLinkEpisodio() {
     }
 }
 
+/**
+ * Envía una invitación a otro usuario para ver el anime actual
+ */
+async function invitarAVer(usuarioInvitado) {
+    if (!currentAnime) {
+        return goldAlert({ 
+            title: "PASO PREVIO", 
+            text: "Primero abre la ficha del anime que quieres ver juntos.", 
+            icon: "📺" 
+        });
+    }
+
+    const epNum = prompt(`¿En qué episodio quieres que se unan?`, "1") || "1";
+
+    const { error } = await _db.from('watch_parties').insert([{
+        host_name: currentUser.trim(),
+        guest_name: usuarioInvitado.trim(),
+        anime_id: currentAnime.mal_id,
+        ep_num: parseInt(epNum),
+        anime_data: currentAnime, 
+        status: 'pending'
+    }]);
+
+    if (!error) {
+        await goldAlert({ 
+            title: "INVITACIÓN ENVIADA", 
+            text: `Esperando a que @${usuarioInvitado} acepte...`, 
+            icon: "📩" 
+        });
+
+        // --- NUEVO: Mandamos también al Anfitrión al cine ---
+        unirseAWatchParty({
+            host_name: currentUser,
+            anime_id: currentAnime.mal_id,
+            ep_num: parseInt(epNum)
+        });
+    } else {
+        console.error("🚨 Error Supabase al invitar:", error);
+        goldAlert({
+            title: "ERROR AL ENVIAR",
+            text: "No se pudo conectar con el servidor de invitaciones.",
+            icon: "❌"
+        });
+    }
+}
+
+/**
+ * Escucha en tiempo real si alguien invita al usuario actual
+ */
+function escucharInvitacionesWatchParty() {
+    if (!currentUser) return;
+
+    console.log("🚀 Iniciando Radar WatchParty para:", currentUser);
+
+    // Usamos un canal global para evitar errores de sintaxis en el nombre del canal
+    const channel = _db.channel('watch-party-global')
+    .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'watch_parties'
+        // Eliminamos el filtro de servidor para máxima compatibilidad
+    }, async (payload) => {
+        const party = payload.new;
+        
+        // Filtramos manualmente en el cliente (Inmune a errores de comillas o espacios)
+        if (String(party.guest_name).trim() !== String(currentUser).trim()) return;
+
+        console.log("🍿 ¡Invitación detectada para ti!", party);
+        reproducirSonidoAnime();
+
+        const aceptar = await goldAlert({
+            title: "¡WATCH PARTY!",
+            text: `@${party.host_name} quiere ver "${party.anime_data.title}" (Ep. ${party.ep_num}) contigo.`,
+            icon: "🍿",
+            showCancel: true,
+            confirmText: "¡VAMOS!"
+        });
+
+        if (aceptar) {
+            unirseAWatchParty(party);
+        }
+    })
+    
+    channel.subscribe((status) => {
+        console.log(`📡 Radar WatchParty (${currentUser}):`, status);
+    });
+}
+
+/**
+ * Sincroniza la interfaz para ver el episodio, forzando la salida de perfiles ajenos
+ */
+async function unirseAWatchParty(party) {
+    // 1. Salimos de la vista de perfil para evitar que el overlay de detalles quede bloqueado
+    const host = party.host_name;
+    const guest = party.guest_name || currentUser;
+
+    if (typeof showPage === 'function') showPage('home');
+
+    try {
+        // 2. Obtenemos datos frescos del anime por ID para asegurar que la ficha abra correctamente
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${party.anime_id}`);
+        const json = await res.json();
+        const animeCompleto = json.data; 
+        if (!animeCompleto) throw new Error("Anime no encontrado");
+
+        // 3. Abrimos la ficha (overlay)
+        await showDetails(animeCompleto);
+        
+        // 4. Cargamos el reproductor con un ligero margen de tiempo para estabilidad
+        setTimeout(() => {
+            reproducirEpisodio(animeCompleto.title, party.ep_num);
+
+            // --- ACTIVAR CHAT TEMPORAL ---
+            activarChatWatchParty(host, guest);
+            
+            const esHost = (party.host_name === currentUser);
+            goldAlert({ 
+                title: esHost ? "SALA CREADA" : "SALA VINCULADA", 
+                text: esHost ? "Tu invitación ha sido procesada." : `Viendo anime junto a @${party.host_name}`, 
+                icon: "✨" 
+            });
+        }, 1200);
+    } catch (e) {
+        console.error("Error al unirse a Watch Party:", e);
+        goldAlert({ title: "ERROR", text: "No pudimos cargar el anime de la invitación.", icon: "❌" });
+    }
+}
+
+/**
+ * Crea un canal de comunicación directo entre Host y Invitado
+ */
+function activarChatWatchParty(host, guest) {
+    // Generamos un ID de sala único basado en ambos nombres ordenados alfabéticamente
+    const roomID = [host, guest].sort().join('-').replace(/\s/g, '_');
+    
+    document.getElementById('wp-chat-box').style.display = 'flex';
+    document.getElementById('wp-msg-list').innerHTML = `<p class="wp-msg-item" style="opacity:0.6; text-align:center;">--- Chat Privado Activado ---</p>`;
+
+    // Suscribirse al canal de Broadcast
+    wpChatChannel = _db.channel(`wp-room-${roomID}`)
+    .on('broadcast', { event: 'shout' }, (payload) => {
+        recibirMsgWatchParty(payload.payload);
+    })
+    .subscribe();
+}
+
+function enviarMsgWatchParty() {
+    const input = document.getElementById('wp-input-msg');
+    const text = input.value.trim();
+    if (!text || !wpChatChannel) return;
+
+    const msgData = { user: currentUser, text: text };
+    
+    // Enviamos el mensaje al otro
+    wpChatChannel.send({
+        type: 'broadcast',
+        event: 'shout',
+        payload: msgData,
+    });
+
+    // Lo mostramos para nosotros
+    recibirMsgWatchParty(msgData);
+    input.value = "";
+}
+
+function recibirMsgWatchParty(data) {
+    const list = document.getElementById('wp-msg-list');
+    const item = document.createElement('div');
+    item.className = "wp-msg-item";
+    item.innerHTML = `<b>${data.user}:</b> ${data.text}`;
+    list.appendChild(item);
+    list.scrollTop = list.scrollHeight;
+}
 
 
 // Abrir y cerrar el chat
-function toggleChat() {
+async function toggleChat() {
     const win = document.getElementById('chat-window');
-    win.style.display = win.style.display === 'none' ? 'flex' : 'none';
-    if(win.style.display === 'flex') cargarMensajesChat();
+    const isOpen = win.style.display === 'flex';
+    
+    win.style.display = isOpen ? 'none' : 'flex';
+    
+    if(!isOpen) {
+        const ahora = new Date().toISOString();
+        
+        // --- PERSISTENCIA GOLD: Guardamos lectura en DB y local ---
+        localStorage.setItem('last_chat_read', ahora);
+
+        if (currentUser) {
+            // Guardamos en la base de datos para que persista tras cerrar sesión
+            await _db.from('perfiles').update({ ultimo_visto_chat: ahora }).ilike('nombre', currentUser);
+            
+            // Sincronizamos el perfil local
+            const p = JSON.parse(localStorage.getItem('aidume_profile'));
+            if(p) {
+                p.ultimo_visto_chat = ahora;
+                localStorage.setItem('aidume_profile', JSON.stringify(p));
+            }
+        }
+
+        const badge = document.getElementById('chat-badge');
+        if(badge) { badge.innerText = "0"; badge.style.display = "none"; }
+        
+        aplicarTemaChatLocal();
+        cargarMensajesChat();
+    }
+}
+
+// Cerrar chat al hacer clic fuera
+window.addEventListener('click', (e) => {
+    const win = document.getElementById('chat-window');
+    const bubble = document.getElementById('chat-bubble');
+    if (win?.style.display === 'flex' && !win.contains(e.target) && !bubble.contains(e.target)) {
+        toggleChat();
+    }
+});
+
+/**
+ * Aplica el tema (contorno y fondo) a la ventana de chat del usuario actual
+ */
+async function aplicarTemaChatLocal() {
+    if (!currentUser) return;
+    const { data } = await _db.from('perfiles').select('tema_chat').eq('nombre', currentUser).single();
+    const win = document.getElementById('chat-window');
+    if (!win) return;
+
+    // Limpiamos clases de temas anteriores
+    win.className = win.className.replace(/\bchat-theme-\S+/g, '');
+    
+    if (data?.tema_chat) {
+        win.classList.add(`chat-theme-${data.tema_chat}`);
+    }
 }
 
 async function enviarMensajeChat() {
@@ -2076,14 +2899,18 @@ async function cargarMensajesChat() {
     const container = document.getElementById('chat-messages');
     if (!container) return;
 
-    // Solo cargamos mensajes de las últimas 2 horas para mantener la fluidez
-    const tiempoLimite = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    // --- CAMBIO: 2 DÍAS DE MENSAJES (48 HORAS) ---
+    const tiempoLimite = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    // Priorizamos el tiempo guardado en el perfil para que no se pierda al desloguear
+    const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
+    const ultimaVezLeido = perfilLocal?.ultimo_visto_chat || localStorage.getItem('last_chat_read') || tiempoLimite;
+    const chatAbierto = document.getElementById('chat-window').style.display === 'flex';
 
     const { data: mensajes, error } = await _db
         .from('chat_global')
         .select(`
             id, usuario, mensaje, fecha,
-            perfiles (avatar_id, es_premium, tema_chat)
+            perfiles (avatar_id, es_premium, tema_chat, racha_dias)
         `) // --- NUEVO: Traemos el estado premium desde perfiles ---
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
@@ -2094,6 +2921,9 @@ async function cargarMensajesChat() {
     }
 
     if (mensajes) {
+        let nuevosCount = 0;
+        let mencionDetectada = false;
+
         container.innerHTML = mensajes.map(m => {
             const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
             // Datos del perfil y sistema de avatares
@@ -2102,6 +2932,21 @@ async function cargarMensajesChat() {
             const avId = perfilData?.avatar_id || '1';
             const avData = todosLosAvatares.find(a => a.id === String(avId)) || AVATARES_RANGOS[0];
             
+            // Lógica de mensajes nuevos y menciones
+            if (m.fecha > ultimaVezLeido) nuevosCount++;
+            
+            let textoMsj = m.mensaje;
+            const regexMencion = new RegExp(`@${currentUser}`, 'i');
+            const soyYoArrobado = currentUser && regexMencion.test(m.mensaje);
+            
+            if (soyYoArrobado) {
+                textoMsj = m.mensaje.replace(regexMencion, `<span class="chat-mention-me">$&</span>`);
+                if (m.fecha > ultimaVezLeido) mencionDetectada = true;
+            }
+
+            // --- LÓGICA DE TEMAS (SKINS) ---
+            const temaClase = perfilData?.tema_chat ? `msg-skin-${perfilData.tema_chat}` : '';
+
             // --- LÓGICA VISUAL PREMIUM ---
             // Si es premium, aplicamos borde dorado, fondo especial y posición relativa para la corona
             const estiloPremium = esPremium 
@@ -2119,18 +2964,19 @@ async function cargarMensajesChat() {
                      onclick="verPerfilAjeno('${m.usuario}')" 
                      style="cursor:pointer;">
                 
-                <div class="chat-msg-body" style="${estiloPremium}">
+                <div class="chat-msg-body ${temaClase}" style="${estiloPremium}">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <strong class="chat-user-name" 
                                 onclick="verPerfilAjeno('${m.usuario}')" 
                                 style="cursor:pointer; text-decoration:underline;">
                             @${m.usuario}
                         </strong>
+                        ${obtenerHtmlRacha(perfilData?.racha_dias)}
                         <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat">🚩</button>
                     </div>
                     
                     <div class="chat-text" style="color:${esPremium ? 'var(--gold)' : 'white'}; font-size:0.9rem; font-weight:${esPremium ? 'bold' : 'normal'};">
-                        ${m.mensaje}
+                        ${textoMsj}
                     </div>
 
                     ${coronaPremium}
@@ -2138,15 +2984,36 @@ async function cargarMensajesChat() {
             </div>`;
         }).join('');
         
-        container.scrollTop = container.scrollHeight;
+        if (chatAbierto) {
+            container.scrollTop = container.scrollHeight;
+            const ahora = new Date().toISOString();
+            localStorage.setItem('last_chat_read', ahora);
+            
+            const p = JSON.parse(localStorage.getItem('aidume_profile'));
+            if(p && p.ultimo_visto_chat !== ahora) {
+                p.ultimo_visto_chat = ahora;
+                localStorage.setItem('aidume_profile', JSON.stringify(p));
+            }
+        } else if (nuevosCount > 0) {
+            // Actualizamos el contador en la burbuja si el chat está cerrado
+            const badge = document.getElementById('chat-badge');
+            if (badge) {
+                badge.innerText = nuevosCount > 99 ? "+99" : nuevosCount;
+                badge.style.display = "block";
+            }
+            
+            if (mencionDetectada) {
+                // --- SONIDO DE MENCIÓN ---
+                reproducirSonidoAnime();
+                lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
+            }
+        }
     }
 }
 
-// Auto-actualizar el chat cada 10 segundos
+// Auto-actualizar el chat cada 10 segundos (siempre corre para ver notificaciones)
 setInterval(() => {
-    if(document.getElementById('chat-window').style.display === 'flex') {
-        cargarMensajesChat();
-    }
+    cargarMensajesChat();
 }, 10000);
 
 async function reportarMensajeChat(msjId, usuarioReportado) {
@@ -2192,6 +3059,17 @@ async function reportarMensajeChat(msjId, usuarioReportado) {
     }
 }
 
+/**
+ * Reproduce un sonido de notificación estilo anime
+ */
+function reproducirSonidoAnime() {
+    // He puesto un sonido tipo "Ding" limpio. 
+    // Puedes cambiar esta URL por un archivo .mp3 que tengas en tu carpeta (ej: 'sonidos/notif.mp3')
+    const audio = new Audio('sonidos/notif.mp3');
+    audio.volume = 0.5;
+    audio.play().catch(e => console.warn("El audio requiere una interacción previa con la página para sonar.", e));
+}
+
 // Funciones para manejar los nuevos modales
 function mostrarAlerta(mensaje, titulo = "🛡️ AVISO AIDUME") {
     document.getElementById('alerta-titulo').innerText = titulo;
@@ -2220,28 +3098,60 @@ async function aceptarNormasRegistro() {
 
 // Carga los últimos episodios lanzados en Japón/Jikan
 async function cargarUltimosEpisodios() {
+    const query = `
+    query ($start: Int, $end: Int) {
+      Page(perPage: 30) {
+        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_DESC) {
+          episode
+          media {
+            idMal
+            popularity
+            title { romaji english native }
+            coverImage { large }
+            description
+            status
+            episodes
+          }
+        }
+      }
+    }`;
+
+    const now = Math.floor(Date.now() / 1000);
+    const hace3Dias = now - (3 * 24 * 60 * 60); // Ventana de 3 días para asegurar contenido
+
     try {
-        const res = await fetch('https://api.jikan.moe/v4/watch/episodes');
-        const json = await res.json();
-        
-        // Tomamos los primeros 12 para que no sea una lista infinita
-        const ultimos = json.data.slice(0, 12);
-        
-        // Mapeamos los datos para que tengan el formato que espera tu función renderGrid
-        // Jikan en este endpoint devuelve 'entry', lo adaptamos:
-        const dataAdaptada = ultimos.map(ep => {
-            return {
-                mal_id: ep.entry.mal_id,
-                title: ep.entry.title,
-                images: ep.entry.images,
-                // Agregamos un badge extra para que se vea el número de episodio
-                episode_number: ep.episodes[0].number 
-            };
+        const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ query, variables: { start: hace3Dias, end: now } })
         });
 
-        renderGrid(dataAdaptada, 'lista-recientes', true); // El 'true' es para avisar que es especial
+        const json = await res.json();
+        const schedules = json.data.Page.airingSchedules;
+
+        let dataAdaptada = schedules.map(s => ({
+            mal_id: s.media.idMal,
+            title: s.media.title.romaji || s.media.title.english,
+            titles: [
+                { type: 'Default', title: s.media.title.romaji },
+                { type: 'English', title: s.media.title.english }
+            ],
+            images: { jpg: { large_image_url: s.media.coverImage.large, image_url: s.media.coverImage.large } },
+            synopsis: s.media.description,
+            episodes: s.media.episodes,
+            status: s.media.status === 'RELEASING' ? 'Currently Airing' : 'Finished',
+            episode_number: s.episode,
+            popularity: s.media.popularity
+        }));
+
+        // --- MEJORA: ORDENAR POR POPULARIDAD (De mayor a menor) ---
+        // Esto asegura que los animes más famosos salgan primero en la lista de recientes
+        dataAdaptada.sort((a, b) => b.popularity - a.popularity);
+
+        // --- MOSTRAR LOS 10 MÁS POPULARES ---
+        renderGrid(dataAdaptada.slice(0, 10), 'lista-recientes');
     } catch (e) {
-        console.error("Error cargando episodios recientes:", e);
+        console.error("Error cargando episodios recientes desde Anilist:", e);
     }
 }
 
@@ -2287,8 +3197,20 @@ async function buscarAnimeFusion(pagina = 1) {
     if (seccionRecientes) seccionRecientes.style.display = 'none';
     if (paginacionNormal) paginacionNormal.style.display = 'none';
     
-    // Cambiamos solo el título de la lista donde aparecerán los resultados
-    if (tituloTodos) tituloTodos.innerText = `Resultados para: "${q}" (Pág. ${paginaBusqueda})`;
+    // Estilo de búsqueda Gold
+    if (tituloTodos) {
+        tituloTodos.innerHTML = `🔍 RASTREANDO: <span style="color:white;">${q.toUpperCase()}</span>`;
+    }
+
+    if (listaTodos) {
+        listaTodos.innerHTML = `
+            <div style="width:100%; text-align:center; padding:30px; animation: slideUp 0.3s ease;">
+                <div style="font-size:2.2rem; animation: diceShake 0.5s infinite; display:inline-block;">📡</div>
+                <p style="color:var(--gold); font-size:0.7rem; font-weight:900; margin-top:10px; letter-spacing:1px;">
+                    FILTRANDO SERVIDORES GLOBALES...
+                </p>
+            </div>`;
+    }
 
     try {
         const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=asc&page=${paginaBusqueda}`);
@@ -2386,7 +3308,7 @@ async function verificarPagoAutomatico() {
             const { error } = await _db
                 .from('perfiles')
                 .update({ es_premium: true })
-                .eq('nombre', currentUser);
+                .ilike('nombre', currentUser);
 
             if (error) throw error;
 
@@ -2432,32 +3354,40 @@ function activarNotificacionesEnVivo() {
         try {
             const res = await fetch(`https://api.jikan.moe/v4/anime/${nuevoEp.anime_id}`);
             const json = await res.json();
-            const nombreAnime = json.data.title;
-            const imagen = json.data.images.jpg.image_url;
+
+            if (!json || !json.data) throw new Error("Anime no encontrado");
+
+            const nombreAnime = json.data.title || "Nuevo Anime";
+            const imagen = json.data.images?.jpg?.image_url;
 
             lanzarNotificacionSistema(
                 `¡NUEVO EPISODIO! 🏆`,
                 `${nombreAnime} - Episodio ${nuevoEp.episodio_num} ya disponible en AiduMe.`,
-                imagen
+                imagen,
+                nuevoEp.anime_id
             );
         } catch (e) {
-            // Si falla Jikan, enviamos una genérica
+            console.warn("Fallo al obtener datos de Jikan para notificación:", e);
             lanzarNotificacionSistema(`¡NUEVO ESTRENO! ⚡`, `Se ha subido el episodio ${nuevoEp.episodio_num} de un nuevo anime.`);
         }
     })
     .subscribe();
 }
 
-async function lanzarNotificacionSistema(titulo, cuerpo, imagen) {
+async function lanzarNotificacionSistema(titulo, cuerpo, imagen, animeId = null) {
     if (Notification.permission === "granted") {
         const opciones = {
             body: cuerpo,
             icon: imagen || 'logo-grande.png',
             badge: 'logo-grande.png',
-            vibrate: [200, 100, 200],
+            vibrate: [300, 100, 300],
+            tag: 'nuevo-episodio', // Evita que se amontonen muchas notificaciones iguales
+            renotify: true,        // Hace que el móvil vibre de nuevo si llega otra
+            data: {
+                url: animeId ? `/?openAnime=${animeId}` : '/'
+            }
         };
         
-        // Usar Service Worker si está disponible (Mejor para móviles)
         if ('serviceWorker' in navigator) {
             const reg = await navigator.serviceWorker.ready;
             reg.showNotification(titulo, opciones);
@@ -2470,3 +3400,104 @@ async function lanzarNotificacionSistema(titulo, cuerpo, imagen) {
 // Mantener tus disparadores vinculados a la nueva función
 function buscarAnime() { buscarAnimeFusion(); }
 function buscarAnimeLive() { buscarAnimeFusion(); }
+
+/**
+ * Actualiza el contador total de mensajes privados no leídos en la barra de navegación
+ */
+async function actualizarNotificacionesPerfil() {
+    if (!currentUser) return;
+    try {
+        const { count, error } = await _db.from('chat_privado')
+            .select('*', { count: 'exact', head: true })
+            .ilike('receptor', currentUser)
+            .eq('leido', false);
+
+        if (error) throw error;
+
+        // Localizamos el botón de "Perfil" en la barra inferior por su atributo onclick
+        const navItems = document.querySelectorAll('.nav-item');
+        const profileNav = Array.from(navItems).find(item => {
+            const click = item.getAttribute('onclick') || "";
+            return click.includes("'perfil'") || click.includes('"perfil"');
+        });
+
+        if (profileNav) {
+            let badge = profileNav.querySelector('.nav-badge-gold');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'nav-badge-gold';
+                profileNav.style.position = 'relative'; // Aseguramos el anclaje
+                profileNav.appendChild(badge);
+            }
+
+            if (count > 0) {
+                badge.innerText = count > 99 ? "99+" : count;
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    } catch (err) {
+        console.error("Error al actualizar badge de perfil:", err);
+    }
+}
+
+/**
+ * Escucha cambios en chat_privado para actualizar el badge de navegación en tiempo real
+ */
+function escucharNotificacionesGlobales() {
+    if (!currentUser) return;
+    _db.channel('badge-notif-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_privado' }, payload => {
+        const m = payload.new || payload.old;
+        // Si el mensaje es para mí, actualizo el contador global de la barra
+        if (m && String(m.receptor).trim().toLowerCase() === currentUser.trim().toLowerCase()) {
+            actualizarNotificacionesPerfil();
+        }
+    }).subscribe();
+}
+
+/**
+ * Inicia el sistema de reconocimiento de voz para buscar animes
+ */
+async function iniciarBusquedaVoz() {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!Recognition) {
+        return goldAlert({ 
+            title: "NO SOPORTADO", 
+            text: "Tu navegador no es compatible con la búsqueda por voz. Prueba en Chrome o Edge.", 
+            icon: "🎙️" 
+        });
+    }
+
+    const rec = new Recognition();
+    rec.lang = 'es-ES'; // Configurado para español
+    rec.continuous = false;
+    rec.interimResults = false;
+
+    const btn = document.getElementById('btn-voice-search');
+    const input = document.getElementById('busqueda');
+
+    rec.onstart = () => {
+        if (btn) btn.classList.add('recording');
+        if (input) input.placeholder = "Escuchando...";
+    };
+
+    rec.onresult = (event) => {
+        const texto = event.results[0][0].transcript;
+        if (input) {
+            input.value = texto;
+            buscarAnimeFusion(); // Ejecuta la búsqueda automáticamente
+        }
+    };
+
+    rec.onend = () => {
+        if (btn) btn.classList.remove('recording');
+        if (input && input.placeholder === "Escuchando...") {
+            input.placeholder = "Buscar anime...";
+        }
+    };
+
+    rec.start();
+}

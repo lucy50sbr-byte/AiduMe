@@ -15,13 +15,18 @@ self.addEventListener('push', function(event) {
 // Manejar el clic en la notificación para abrir AiduMe
 self.addEventListener('notificationclick', function(event) {
     event.notification.close();
+    const targetUrl = event.notification.data.url || '/';
+
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
             if (clientList.length > 0) {
-                let client = clientList[0];
-                if ('focus' in client) return client.focus();
+                for (let client of clientList) {
+                    if ('focus' in client && 'navigate' in client) {
+                        return client.navigate(targetUrl).then(c => c.focus());
+                    }
+                }
             }
-            if (clients.openWindow) return clients.openWindow('/');
+            if (clients.openWindow) return clients.openWindow(targetUrl);
         })
     );
 });

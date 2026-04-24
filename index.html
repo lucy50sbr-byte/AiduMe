@@ -134,6 +134,11 @@
     <h2 class="section-h">Todos los Animes</h2>
 </div>
 <div id="lista-todos"></div>
+<div id="paginacion-container" style="display: none; justify-content: center; align-items: center; gap: 20px; margin: 30px 0; padding-bottom: 20px;">
+    <button id="btn-prev-all" onclick="cambiarPaginaCompleta(-1)" class="btn-random-gold">❮ Anterior</button>
+    <span id="page-number-all" style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página 1</span>
+    <button id="btn-next-all" onclick="cambiarPaginaCompleta(1)" class="btn-random-gold">Siguiente ❯</button>
+</div>
 
     </div> <div id="mis-listas" class="page">
         <h2 class="section-h">Mis Favoritos</h2>
@@ -184,6 +189,11 @@
             <div class="xp-text-group"><span>Progreso de Nivel</span><span id="xp-text">0/3 XP</span></div>
             <div class="xp-container-pro"><div id="xp-bar" class="xp-bar-fill"></div></div>
         </div>
+
+        <div id="seccion-amigos-perfil" class="inner-badges-box" style="margin-top: 20px; display: none;">
+            <h3 class="section-title-gold centered">👥 Amigos y Solicitudes</h3>
+            <div id="lista-amigos-u" class="badge-grid-pro" style="flex-direction: column; align-items: stretch; gap: 10px;"></div>
+        </div>
     </div>
 
     <button onclick="abrirTienda()" class="btn-normas" style="border-color: #00d4ff; color: #00d4ff; background: rgba(0, 212, 255, 0.05); margin-bottom: 10px;">
@@ -204,6 +214,18 @@
             <p>4. <b>Autoridad:</b> Las decisiones de Admins son inapelables.</p>
         </div>
         <button onclick="cerrarModalNormas()" class="action-btn" style="margin-top: 20px;">ENTENDIDO</button>
+    </div>
+</div>
+
+<div id="modal-chat-privado" class="modal-gold-overlay" style="display:none;">
+    <div class="modal-gold-card" style="max-width: 400px; height: 500px; display: flex; flex-direction: column;">
+        <h3 id="privado-titulo" class="section-title-gold centered" style="margin-bottom: 10px;">💬 Chat con Amigo</h3>
+        <div id="privado-mensajes" style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
+        <div class="chat-input-area" style="background: transparent; padding: 0;">
+            <input type="text" id="privado-input" placeholder="Escribe un mensaje..." style="flex: 1; background: #222; border: 1px solid var(--gold); color: white; padding: 10px; border-radius: 8px; outline: none;">
+            <button onclick="enviarMensajePrivado()" style="background: var(--gold); border: none; border-radius: 8px; padding: 10px 15px; cursor: pointer;">🚀</button>
+        </div>
+        <button onclick="cerrarChatPrivado()" class="btn-random-gold" style="margin-top: 10px; width: 100%;">Cerrar</button>
     </div>
 </div>
 

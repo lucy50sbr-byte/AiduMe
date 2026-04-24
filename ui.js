@@ -134,6 +134,9 @@ async function comprarTema(id, costo) {
         // Si ya lo tiene, simplemente lo equipamos
         await _db.from('perfiles').update({ tema_chat: id }).eq('nombre', currentUser);
         goldAlert({ title: "TEMA EQUIPADO", text: "Has cambiado el skin de tus mensajes.", icon: "✨" });
+        actualizarPerfilDesdeSQL();
+        if(typeof aplicarTemaChatLocal === 'function') aplicarTemaChatLocal();
+        if(typeof cargarMensajesChat === 'function') cargarMensajesChat();
         return cerrarTienda();
     }
 
@@ -153,6 +156,9 @@ async function comprarTema(id, costo) {
         
         lanzarConfetiGold();
         goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo skin de chat activado.", icon: "🔥" });
+        actualizarPerfilDesdeSQL();
+        if(typeof aplicarTemaChatLocal === 'function') aplicarTemaChatLocal();
+        if(typeof cargarMensajesChat === 'function') cargarMensajesChat();
         cerrarTienda();
     }
 }
@@ -414,6 +420,45 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
                 : (esMismoUsuario ? "Toca aquí para añadir tu frase..." : "Sin descripción.");
         }
 
+        // --- 4.5 GESTIÓN DE BOTONES DE AMISTAD ---
+        const containerStats = document.querySelector('.profile-stats-row');
+        const idBtnAmigo = 'btn-friend-action';
+        if (document.getElementById(idBtnAmigo)) document.getElementById(idBtnAmigo).remove();
+
+        if (!esMismoUsuario && containerStats) {
+            const u1 = (currentUser || "").trim();
+            const u2 = (nombreAMostrar || "").trim();
+
+            // Consultar estado de amistad
+            const { data: amistades } = await _db.from('amistades')
+                .select('*')
+                .or(`and(usuario_envia.eq."${u1}",usuario_recibe.eq."${u2}"),and(usuario_envia.eq."${u2}",usuario_recibe.eq."${u1}")`);
+
+            const relacion = amistades && amistades.length > 0 ? amistades[0] : null;
+
+            const btn = document.createElement('button');
+            btn.id = idBtnAmigo;
+            btn.className = 'btn-watch-party'; // Reutilizamos estilo
+
+            if (!relacion) {
+                btn.innerHTML = `➕ Agregar Amigo`;
+                btn.onclick = () => enviarSolicitudAmistad(nombreAMostrar);
+            } else if (relacion.estado === 'pendiente') {
+                btn.innerHTML = relacion.usuario_envia === currentUser ? `⏳ Solicitud Enviada` : `✔️ Aceptar Amigo`;
+                btn.style.opacity = relacion.usuario_envia === currentUser ? "0.6" : "1";
+                if (relacion.usuario_recibe === currentUser) btn.onclick = () => gestionarSolicitud(relacion.id, 'aceptar', nombreAMostrar);
+            } else {
+                btn.innerHTML = `💬 Mensaje Privado`;
+                btn.style.background = "linear-gradient(45deg, #ffd700, #ff8c00)";
+                btn.style.color = "black";
+                btn.onclick = () => cargarChatPrivado(nombreAMostrar);
+            }
+            containerStats.after(btn);
+        }
+
+        // Renderizar lista de amigos en perfil propio
+        renderizarSeccionAmigos(perfil, esMismoUsuario);
+
         // --- 4. GESTIÓN DE AVATARES ---
         const avatarActualId = perfil.avatar_id || '1';
         // BUSQUEDA FUSIONADA: Buscamos en ambas listas
@@ -547,6 +592,9 @@ function renderGrid(data, id) {
             etiquetaHTML = `<div class="status-tag proximamente">Pronto</div>`;
         }
 
+        // Badge para el número de episodio (Se activará automáticamente en la sección de Recientes)
+        let epBadgeHTML = a.episode_number ? `<div class="ep-badge-float">EP ${a.episode_number}</div>` : "";
+
         // 2. TÍTULOS: Buscamos en español, si no, usamos el título principal
         const titleEs = a.titles ? a.titles.find(t => t.type === 'Spanish')?.title : null;
         const nombreMostrar = titleEs || a.title || "Sin título";
@@ -559,6 +607,7 @@ function renderGrid(data, id) {
         // 4. CONSTRUCCIÓN DEL HTML INTERNO
         div.innerHTML = `
             ${etiquetaHTML}
+            ${epBadgeHTML}
             <img src="${imgUrl}" loading="lazy" alt="${nombreMostrar}">
             <div class="card-title">${nombreMostrar}</div>
         `;

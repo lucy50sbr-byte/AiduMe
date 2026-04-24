@@ -75,7 +75,7 @@ async function ejecutarAuth() {
             const { data: perfil, error } = await _db
                 .from('perfiles')
                 .select('*')
-                .eq('nombre', user)
+                .ilike('nombre', user)
                 .eq('password', pass)
                 .maybeSingle();
 
@@ -163,7 +163,8 @@ function finalizarLogin(perfil) {
         age: perfil.edad,
         rol: perfil.rol || 'user',
         premium: perfil.es_premium || false,
-        avatar_id: perfil.avatar_id || '1'
+        avatar_id: perfil.avatar_id || '1',
+        ultimo_visto_chat: perfil.ultimo_visto_chat
     }));
     
     // Mostramos el icono de chat antes de cualquier otra acción
