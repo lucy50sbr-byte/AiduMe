@@ -1,8 +1,8 @@
 let dataSaver = localStorage.getItem('data_saver') === 'true';
 
 // Reemplaza esto con tu "Public Key" de Mercado Pago (empieza con APP_USR-... o TEST-...)
-const mp = typeof MercadoPago !== 'undefined' ? new MercadoPago('TEST-f9ffbc48-59c2-4122-aac0-4538f35ce764') : null;
-let cardPaymentBrickController = null;
+let mp = null;
+let cardFields = null;
 
 function lanzarConfetiGold() {
     if (typeof confetti !== 'undefined') {
@@ -73,6 +73,8 @@ function abrirTienda() {
     const grid = document.getElementById('tienda-avatares-grid');
     if (!modal || !grid) return;
 
+    toggleTiendaSeccion(null); // Asegura que todo inicie cerrado
+
     grid.innerHTML = "";
     AVATARES_TIENDA.forEach(av => {
         const div = document.createElement('div');
@@ -122,6 +124,26 @@ function abrirTienda() {
     }
 
     modal.style.display = 'flex';
+}
+
+function toggleTiendaSeccion(id) {
+    const secciones = ['tienda-avatares-grid', 'tienda-temas-grid', 'tienda-stickers-grid'];
+    secciones.forEach(sId => {
+        const el = document.getElementById(sId);
+        if (!el) return;
+        
+        const btn = el.previousElementSibling;
+        const arrow = btn ? btn.querySelector('.arrow') : null;
+
+        if (sId === id) {
+            const isHidden = el.style.display === 'none' || el.style.display === '';
+            el.style.display = isHidden ? 'grid' : 'none';
+            if (arrow) arrow.innerText = isHidden ? '▲' : '▼';
+        } else {
+            el.style.display = 'none';
+            if (arrow) arrow.innerText = '▼';
+        }
+    });
 }
 
 function cerrarTienda() { document.getElementById('modal-tienda').style.display = 'none'; }
@@ -228,49 +250,79 @@ function mostrarCheckoutInterno() {
 }
 
 function mostrarCheckoutTarjeta() {
+    // Intentamos inicializar MP si aún no está listo
+    if (typeof MercadoPago !== 'undefined' && !mp) {
+        mp = new MercadoPago('TEST-24e7dbce-65e5-4803-a7d1-76ba6014f07b');
+    }
+
     document.getElementById('checkout-interno').style.display = 'none';
     const panel = document.getElementById('checkout-tarjeta');
     if (panel) {
         panel.style.display = 'block';
+        
+        // Retardo mayor para asegurar que la animación terminó y el DOM es estable
+        setTimeout(() => {
+            panel.scrollIntoView({ behavior: 'smooth' });
 
-        // Ocultamos el botón manual viejo ya que el Brick trae su propio botón de pago
-        const btnViejo = document.getElementById('btn-pagar-tarjeta');
-        if(btnViejo) btnViejo.style.display = 'none';
+        if (mp && !cardFields) {
+            // Inicializamos los campos personalizados para que se vean como tus inputs
+            const fields = mp.fields();
+            const style = { 
+                color: "#ffffff", 
+                fontSize: "16px", 
+                fontFamily: "Segoe UI",
+                placeholder: { color: "#888888" },
+                // Agregamos padding interno al input real dentro del iframe
+                margin: "0",
+                padding: "12px" 
+            };
 
-        if (mp && !cardPaymentBrickController) {
-            const bricksBuilder = mp.bricks();
-            bricksBuilder.create('cardPayment', 'card-element', {
-                initialization: { amount: 4000 }, // Monto en tu moneda (ej: 4000 ARS)
-                customization: {
-                    visual: { theme: 'dark' },
-                    paymentMethods: { minInstallments: 1, maxInstallments: 1 }
-                },
-                callbacks: {
-                    onReady: () => console.log("Mercado Pago Ready"),
-                    onSubmit: (formData) => procesarPagoMercadoPago(formData),
-                    onError: (error) => console.error(error)
-                }
-            }).then(controller => cardPaymentBrickController = controller);
+            cardFields = {
+                number: fields.create('cardNumber', { placeholder: "0000 0000 0000 0000", style }).mount('cardNumber'),
+                expiration: fields.create('expirationDate', { placeholder: "MM/YY", style }).mount('expirationDate'),
+                securityCode: fields.create('securityCode', { placeholder: "CVV", style }).mount('securityCode')
+            };
         }
+        }, 400);
     }
-    panel.scrollIntoView({ behavior: 'smooth' });
 }
 
-async function procesarPagoMercadoPago(formData) {
+async function procesarPagoTarjeta() {
+    const btn = document.getElementById('btn-pagar-tarjeta');
+    const name = document.getElementById('card-name').value.trim();
+
+    if (!name) return goldAlert({ title: "ERROR", text: "Ingresa el nombre del titular.", icon: "💳" });
+    if (!mp || !cardFields) return;
+
+    btn.disabled = true;
+    btn.innerText = "TOKENIZANDO...";
+
     try {
+        // Generamos el token de la tarjeta usando tus campos
+        const tokenResponse = await mp.fields.createCardToken({ cardholderName: name });
+        const token = tokenResponse.id;
+
+        // Obtenemos el método de pago e emisor automáticamente
+        const bin = tokenResponse.first_six_digits;
+        const paymentMethods = await mp.getPaymentMethods({ bin });
+        const payment_method_id = paymentMethods.results[0].id;
+
+        btn.innerText = "PROCESANDO PAGO...";
+
         const { data: p } = await _db.from('perfiles').select('email').ilike('nombre', currentUser).single();
+        
+        // SOLUCIÓN AL ERROR DE EMAIL: Si el perfil no tiene email, usamos uno temporal
+        const validEmail = (p?.email && p.email.includes('@')) ? p.email : `${currentUser.toLowerCase()}@aidume.com`;
 
         // Enviamos el token generado por MP a nuestra Edge Function
         const { data, error: funcError } = await _db.functions.invoke('verify-payment', {
             body: { 
                 usuario: currentUser, 
                 metodo: 'mercadopago',
-                email: p?.email || '',
-                token: formData.token,
-                issuer_id: formData.issuer_id,
-                payment_method_id: formData.payment_method_id,
-                installments: formData.installments,
-                identification: formData.payer.identification
+                email: validEmail,
+                token: token,
+                payment_method_id: payment_method_id,
+                installments: 1
             }
         });
 
@@ -298,12 +350,12 @@ async function procesarPagoMercadoPago(formData) {
         location.reload();
 
     } catch (err) {
+        console.error(err);
         goldAlert({ title: "ERROR", text: err.message, icon: "❌" });
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "PAGAR $4.00 USD";
     }
-}
-
-async function procesarPagoTarjeta() {
-    return; // Función obsoleta para MP
 }
 
 async function enviarComprobantePago() {

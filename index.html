@@ -265,14 +265,24 @@
                     <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">NOMBRE DEL TITULAR</label>
                     <input type="text" id="card-name" placeholder="TAL CUAL APARECE EN LA TARJETA" class="modern-input" style="width:100%; box-sizing:border-box; text-transform:uppercase; margin-bottom: 15px;">
                     
-                    <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">DATOS DE LA TARJETA</label>
-                    <div id="card-element">
-                        <!-- Stripe inyectará el campo seguro aquí -->
+                    <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">NÚMERO DE TARJETA</label>
+                    <div id="cardNumber" class="mp-card-field-container" style="margin-bottom:15px; min-height:45px;"></div>
+
+                    <div style="display:flex; gap:10px; margin-bottom:15px;">
+                        <div style="flex:1;">
+                            <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">VENCIMIENTO</label>
+                            <div id="expirationDate" class="mp-card-field-container"></div>
+                        </div>
+                        <div style="flex:1;">
+                            <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">CVV</label>
+                            <div id="securityCode" class="mp-card-field-container"></div>
+                        </div>
                     </div>
+                    <div id="issuer-container" style="display:none;"></div>
                 </div>
 
                 <div style="display:flex; gap:10px; margin-top:15px;">
-                    <button onclick="procesarPagoTarjeta()" id="btn-pagar-tarjeta" class="btn-filter-flv" style="flex:2; height:auto; padding:12px;">PAGAR $4.00 USD</button>
+                    <button onclick="procesarPagoTarjeta()" id="btn-pagar-tarjeta" class="btn-filter-flv" style="flex:2; height:auto; padding:12px; display:block !important;">PAGAR $4.00 USD</button>
                     <button onclick="document.getElementById('checkout-tarjeta').style.display='none'" class="btn-random-gold" style="flex:1; margin:0;">X</button>
                 </div>
                 <p style="font-size:0.55rem; color:#666; margin-top:10px; text-align:center;">🔒 Tus datos están protegidos por AiduMe</p>
@@ -297,17 +307,20 @@
                 </div>
             </div>
 
-            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🎭 AVATARES EXCLUSIVOS</h4>
-            <div id="tienda-avatares-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+            <button onclick="toggleTiendaSeccion('tienda-avatares-grid')" class="btn-random-gold" style="width:100%; justify-content: space-between; margin-top: 15px; padding: 12px 15px;">
+                <span>🎭 AVATARES EXCLUSIVOS</span> <span class="arrow">▼</span>
+            </button>
+            <div id="tienda-avatares-grid" class="avatar-selector-grid" style="display:none; max-height: 250px; overflow-y: auto; padding: 10px 5px; margin: 10px 0;"></div>
 
-            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">✨ SKINS PARA CHAT</h4>
-            <div id="tienda-temas-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+            <button onclick="toggleTiendaSeccion('tienda-temas-grid')" class="btn-random-gold" style="width:100%; justify-content: space-between; margin-top: 10px; padding: 12px 15px;">
+                <span>✨ SKINS PARA CHAT</span> <span class="arrow">▼</span>
+            </button>
+            <div id="tienda-temas-grid" class="avatar-selector-grid" style="display:none; max-height: 250px; overflow-y: auto; padding: 10px 5px; margin: 10px 0;"></div>
 
-            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🖼️ PAQUETES DE STICKERS</h4>
-            <div id="tienda-stickers-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
-
-            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🖼️ PAQUETES DE STICKERS</h4>
-            <div id="tienda-stickers-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+            <button onclick="toggleTiendaSeccion('tienda-stickers-grid')" class="btn-random-gold" style="width:100%; justify-content: space-between; margin-top: 10px; padding: 12px 15px;">
+                <span>🖼️ COLECCIÓN DE STICKERS</span> <span class="arrow">▼</span>
+            </button>
+            <div id="tienda-stickers-grid" class="avatar-selector-grid" style="display:none; max-height: 250px; overflow-y: auto; padding: 10px 5px; margin: 10px 0;"></div>
 
             <button onclick="cerrarTienda()" class="action-btn" style="margin-top: 20px; background: #222; color: white; border: 1px solid #444;">Cerrar</button>
         </div>
