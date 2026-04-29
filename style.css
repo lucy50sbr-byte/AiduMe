@@ -1299,6 +1299,22 @@ header {
     margin-bottom: 15px;
 }
 
+/* Estilos para el campo seguro de Stripe */
+.StripeElement {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    transition: 0.3s;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.StripeElement--focus {
+    border-color: var(--gold);
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+}
+
 .input-group-admin .modern-input {
     width: 100%;
     box-sizing: border-box;
@@ -1547,6 +1563,8 @@ header {
     padding: 8px 12px;
     border-radius: 12px;
     border-top-left-radius: 2px;
+    min-width: 0; /* Evita que el contenedor se expanda fuera del chat */
+    word-wrap: break-word;
 }
 
 .chat-user-name {
@@ -1574,6 +1592,8 @@ header {
 
 .chat-text {
     word-wrap: break-word;
+    overflow-wrap: break-word; /* Rompe palabras largas si es necesario */
+    word-break: break-word;
     color: #eee !important;
     margin-top: 4px;
 }
@@ -2176,7 +2196,7 @@ header {
 
 /* --- SISTEMA DE RACHAS --- */
 .racha-item {
-    display: inline-block;
+    display: inline-flex;
     align-items: center;
     margin-left: 6px;
     vertical-align: middle;
@@ -2196,8 +2216,128 @@ header {
     display: inline-block;
 }
 
+/* --- SELECTOR DE EMOJIS GOLD --- */
+.emoji-picker-popup {
+    position: fixed;
+    background: #111;
+    border: 1.5px solid var(--gold);
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    z-index: 11000;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.9);
+    width: 240px;
+    animation: slideUp 0.2s ease;
+}
+
+.emoji-item {
+    font-size: 1.4rem;
+    cursor: pointer;
+    transition: 0.2s;
+    text-align: center;
+    user-select: none;
+}
+
+.emoji-item:hover { transform: scale(1.25); }
+
+.emoji-trigger {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    opacity: 0.7;
+    transition: 0.3s;
+}
+.emoji-trigger:hover { opacity: 1; transform: scale(1.1); }
+
+/* Ajuste para los iconos de imagen en los botones disparadores */
+.emoji-trigger img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    /* Filtro Gold Edition: Convierte el gris/negro en un dorado vibrante */
+    filter: sepia(100%) saturate(500%) brightness(1.1) hue-rotate(5deg) drop-shadow(0 0 2px rgba(255, 215, 0, 0.4));
+    transition: all 0.3s ease;
+}
+
+.emoji-trigger:hover img {
+    filter: sepia(100%) saturate(1000%) brightness(1.3) hue-rotate(5deg) drop-shadow(0 0 8px var(--gold));
+}
+
 @keyframes text-shine-sweep {
     to { background-position: 200% center; }
+}
+
+/* --- STICKERS GOLD --- */
+.sticker-picker-popup {
+    position: fixed;
+    background: #111;
+    border: 1.5px solid var(--gold);
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    z-index: 11000;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.9);
+    width: 250px;
+    max-height: 300px;
+    overflow: hidden;
+    animation: slideUp 0.2s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.sticker-tabs {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255,215,0,0.2);
+    scrollbar-width: none;
+}
+.sticker-tabs::-webkit-scrollbar { display: none; }
+
+.sticker-tab {
+    font-size: 0.6rem;
+    padding: 4px 8px;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #888;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.sticker-tab.active { background: var(--gold); color: #000; border-color: var(--gold); }
+
+.sticker-item {
+    width: 100%;
+    aspect-ratio: 1/1;
+    object-fit: contain;
+    cursor: pointer;
+    transition: 0.2s;
+    border-radius: 8px;
+}
+.sticker-item:hover { transform: scale(1.1); background: rgba(255,215,0,0.1); }
+
+.sticker-grid-content {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.chat-sticker {
+    max-width: 130px;
+    max-height: 130px;
+    display: block;
+    margin: 8px 0;
+    border-radius: 10px;
+    filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));
 }
 
 /* Tiers de Rachas */

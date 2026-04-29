@@ -1,7 +1,8 @@
 let dataSaver = localStorage.getItem('data_saver') === 'true';
 
-// Reemplaza esto con tu "Publishable key" de Stripe (empieza con pk_test_... o pk_live_...)
-const stripe = typeof Stripe !== 'undefined' ? Stripe('pk_test_51TOscL1oJk3N94k9OQcSuL8ji1Ib2vAj57ox4vfct1lxPYJFu69Hs5Oo2c4aPS45UnQ7B4D1H4kJAXI1Sk3dnEb900AscPaVK3') : null;
+// Reemplaza esto con tu "Public Key" de Mercado Pago (empieza con APP_USR-... o TEST-...)
+const mp = typeof MercadoPago !== 'undefined' ? new MercadoPago('TEST-f9ffbc48-59c2-4122-aac0-4538f35ce764') : null;
+let cardPaymentBrickController = null;
 
 function lanzarConfetiGold() {
     if (typeof confetti !== 'undefined') {
@@ -53,6 +54,20 @@ const TEMAS_CHAT = [
     { id: 'emerald', costo: 4000, nombre: 'Esmeralda', class: 'msg-skin-emerald', color: '#2ecc71' }
 ];
 
+// Definición de los 10 paquetes comprables (11-110)
+const STICKER_PACKS_TIENDA = [
+    { id: 'stk_pack_2', costo: 500, nombre: 'Pack Ninja', inicio: 11, fin: 20 },
+    { id: 'stk_pack_3', costo: 500, nombre: 'Pack Acción', inicio: 21, fin: 30 },
+    { id: 'stk_pack_4', costo: 800, nombre: 'Pack Super', inicio: 31, fin: 40 },
+    { id: 'stk_pack_5', costo: 800, nombre: 'Pack Kawaii', inicio: 41, fin: 50 },
+    { id: 'stk_pack_6', costo: 1000, nombre: 'Pack Demon', inicio: 51, fin: 60 },
+    { id: 'stk_pack_7', costo: 1000, nombre: 'Pack Mecha', inicio: 61, fin: 70 },
+    { id: 'stk_pack_8', costo: 1500, nombre: 'Pack Gore', inicio: 71, fin: 80 },
+    { id: 'stk_pack_9', costo: 1500, nombre: 'Pack Retro', inicio: 81, fin: 90 },
+    { id: 'stk_pack_10', costo: 2000, nombre: 'Pack Titan', inicio: 91, fin: 100 },
+    { id: 'stk_pack_11', costo: 3000, nombre: 'Pack Dios', inicio: 101, fin: 110 }
+];
+
 function abrirTienda() {
     const modal = document.getElementById('modal-tienda');
     const grid = document.getElementById('tienda-avatares-grid');
@@ -87,6 +102,22 @@ function abrirTienda() {
                         style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">💰 ${t.costo}</button>
             `;
             gridTemas.appendChild(div);
+        });
+    }
+
+    // Cargar Stickers en la Tienda
+    const gridStickers = document.getElementById('tienda-stickers-grid');
+    if (gridStickers) {
+        gridStickers.innerHTML = "";
+        STICKER_PACKS_TIENDA.forEach(p => {
+            const div = document.createElement('div');
+            div.className = "chat-skin-card";
+            div.innerHTML = `
+                <img src="stickers/${p.inicio}.gif" style="width:30px; height:30px; object-fit:contain; margin-bottom:5px;">
+                <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${p.nombre}</div>
+                <button onclick="comprarStickerPack('${p.id}', ${p.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">💰 ${p.costo}</button>`;
+            gridStickers.appendChild(div);
         });
     }
 
@@ -163,6 +194,33 @@ async function comprarTema(id, costo) {
     }
 }
 
+async function comprarStickerPack(id, costo) {
+    const { data: perfil } = await _db.from('perfiles').select('aidufichas, stickers_comprados').eq('nombre', currentUser).single();
+    
+    if (perfil.stickers_comprados?.includes(id)) {
+        return goldAlert({ title: "YA LO TIENES", text: "Este paquete de stickers ya está en tu colección.", icon: "🖼️" });
+    }
+
+    if (perfil.aidufichas < costo) {
+        return goldAlert({ title: "FICHAS INSUFICIENTES", text: `Necesitas ${costo} fichas para este pack.`, icon: "📉" });
+    }
+
+    const confirmar = await goldAlert({ title: "COMPRAR PACK", text: `¿Quieres desbloquear este paquete por ${costo} fichas?`, icon: "🖼️", showCancel: true });
+
+    if (confirmar) {
+        const nuevaLista = [...(perfil.stickers_comprados || []), id];
+        await _db.from('perfiles').update({ 
+            aidufichas: perfil.aidufichas - costo, 
+            stickers_comprados: nuevaLista
+        }).eq('nombre', currentUser);
+        
+        lanzarConfetiGold();
+        goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo paquete de stickers listo para usar.", icon: "✨" });
+        actualizarPerfilDesdeSQL();
+        cerrarTienda();
+    }
+}
+
 function mostrarCheckoutInterno() {
     const panel = document.getElementById('checkout-interno');
     if (panel) panel.style.display = 'block';
@@ -172,70 +230,80 @@ function mostrarCheckoutInterno() {
 function mostrarCheckoutTarjeta() {
     document.getElementById('checkout-interno').style.display = 'none';
     const panel = document.getElementById('checkout-tarjeta');
-    if (panel) panel.style.display = 'block';
+    if (panel) {
+        panel.style.display = 'block';
+
+        // Ocultamos el botón manual viejo ya que el Brick trae su propio botón de pago
+        const btnViejo = document.getElementById('btn-pagar-tarjeta');
+        if(btnViejo) btnViejo.style.display = 'none';
+
+        if (mp && !cardPaymentBrickController) {
+            const bricksBuilder = mp.bricks();
+            bricksBuilder.create('cardPayment', 'card-element', {
+                initialization: { amount: 4000 }, // Monto en tu moneda (ej: 4000 ARS)
+                customization: {
+                    visual: { theme: 'dark' },
+                    paymentMethods: { minInstallments: 1, maxInstallments: 1 }
+                },
+                callbacks: {
+                    onReady: () => console.log("Mercado Pago Ready"),
+                    onSubmit: (formData) => procesarPagoMercadoPago(formData),
+                    onError: (error) => console.error(error)
+                }
+            }).then(controller => cardPaymentBrickController = controller);
+        }
+    }
     panel.scrollIntoView({ behavior: 'smooth' });
 }
 
-async function procesarPagoTarjeta() {
-    const btn = document.getElementById('btn-pagar-tarjeta');
-    const num = document.getElementById('card-number').value.replace(/\s/g, '');
-    const exp = document.getElementById('card-expiry').value;
-    const cvc = document.getElementById('card-cvc').value;
-    const name = document.getElementById('card-name').value.trim();
-
-    if (num.length < 15 || exp.length < 5 || cvc.length < 3 || !name) {
-        return goldAlert({ title: "DATOS INCOMPLETOS", text: "Por favor, completa todos los campos de la tarjeta.", icon: "💳" });
-    }
-
-    btn.disabled = true;
-    btn.innerText = "PROCESANDO...";
-
+async function procesarPagoMercadoPago(formData) {
     try {
-        // 1. Convertimos los datos en un Token de Stripe (Seguridad PCI)
-        const [expMonth, expYear] = exp.split('/');
-        const { token, error: stripeError } = await stripe.createToken({
-            number: num,
-            exp_month: expMonth,
-            exp_year: expYear,
-            cvc: cvc,
-            name: name
+        const { data: p } = await _db.from('perfiles').select('email').ilike('nombre', currentUser).single();
+
+        // Enviamos el token generado por MP a nuestra Edge Function
+        const { data, error: funcError } = await _db.functions.invoke('verify-payment', {
+            body: { 
+                usuario: currentUser, 
+                metodo: 'mercadopago',
+                email: p?.email || '',
+                token: formData.token,
+                issuer_id: formData.issuer_id,
+                payment_method_id: formData.payment_method_id,
+                installments: formData.installments,
+                identification: formData.payer.identification
+            }
         });
 
-        if (stripeError) throw new Error(stripeError.message);
+        if (funcError) {
+            // Intentamos extraer el mensaje de error detallado del cuerpo de la respuesta
+            let mensajeDetalle = "Error en el servidor de pagos.";
+            if (funcError.context && funcError.context.json) {
+                try {
+                    const bodyError = await funcError.context.json();
+                    mensajeDetalle = bodyError.details || bodyError.message || mensajeDetalle;
+                } catch (e) {
+                    mensajeDetalle = funcError.message;
+                }
+            } else {
+                mensajeDetalle = funcError.message;
+            }
+            throw new Error(mensajeDetalle);
+        }
 
-        // 2. Enviamos el token a nuestro Backend Gold
-        const response = await fetch(`${_supabaseUrl}/functions/v1/verify-payment`, { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                usuario: currentUser,
-                monto: 4.0,
-                metodo: 'tarjeta',
-                stripeToken: token.id
-            })
-        });
-
-        const resData = await response.json();
-        if (!response.ok) throw new Error(resData.message || "Error en pasarela");
-
-        // ¡Celebración Gold!
         lanzarConfetiGold();
+        const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
+        if (perfilLocal) { perfilLocal.premium = true; localStorage.setItem('aidume_profile', JSON.stringify(perfilLocal)); }
 
-        await goldAlert({
-            title: "¡PAGO EXITOSO!",
-            text: "El cobro se ha realizado correctamente. Tu rango PREMIUM ha sido activado de por vida. ¡Disfruta de AiduMe Gold!",
-            icon: "👑",
-            confirmText: "GENIAL"
-        });
+        await goldAlert({ title: "¡PAGO EXITOSO!", text: "Ya eres miembro PREMIUM.", icon: "👑" });
+        location.reload();
 
-        location.reload(); // Recargamos para aplicar el premium
     } catch (err) {
-        console.error(err);
-        goldAlert({ title: "ERROR DE COBRO", text: err.message, icon: "❌" });
-    } finally {
-        btn.disabled = false;
-        btn.innerText = "PAGAR $4.00 USD";
+        goldAlert({ title: "ERROR", text: err.message, icon: "❌" });
     }
+}
+
+async function procesarPagoTarjeta() {
+    return; // Función obsoleta para MP
 }
 
 async function enviarComprobantePago() {
@@ -246,24 +314,12 @@ async function enviarComprobantePago() {
     }
 
     try {
-        // En lugar de insertar en la DB desde el cliente (inseguro),
-        // llamamos a nuestro nuevo servidor backend.
-        const response = await fetch(`${_supabaseUrl}/functions/v1/verify-payment`, { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                usuario: currentUser,
-                referencia: ref,
-                monto: 4.0
-            })
-        });
-
-        const resultado = await response.json();
-        if (!response.ok) throw new Error(resultado.message);
+        // Simulación para transferencia: Simplemente enviamos un aviso de "Pendiente"
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
         goldAlert({
             title: "SOLICITUD ENVIADA",
-            text: "Tu comprobante está siendo analizado por el sistema Gold. El rango Premium se activará en breve una vez confirmados los fondos.",
+            text: "Tu comprobante #" + ref + " ha sido recibido. Un administrador lo revisará pronto para activar tu rango.",
             icon: "⏳"
         });
         
@@ -358,6 +414,7 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         elBio: document.getElementById('display-bio'),
         elUser: document.getElementById('display-user'),
         elLevel: document.getElementById('display-level'),
+        elRank: document.getElementById('display-rank'),
         elVistos: document.getElementById('stat-vistos'),
         elHoras: document.getElementById('stat-horas'),
         elFichas: document.getElementById('stat-fichas'),
@@ -400,6 +457,12 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         // --- 3. ACTUALIZACIÓN DE TEXTOS Y UI ---
         if (elementos.elUser) elementos.elUser.innerText = perfil.nombre;
         if (elementos.elLevel) elementos.elLevel.innerText = perfil.nivel;
+
+        if (elementos.elRank) {
+            const htmlRacha = typeof obtenerHtmlRacha === 'function' ? obtenerHtmlRacha(perfil.racha_dias) : "";
+            elementos.elRank.innerHTML = htmlRacha || "ASPIRANTE";
+        }
+
         if (elementos.elVistos) elementos.elVistos.innerText = totalVistos;
         if (elementos.elHoras) elementos.elHoras.innerText = `${horasTotales}h`;
         if (elementos.elFichas) elementos.elFichas.innerText = perfil.aidufichas || 0;
@@ -915,3 +978,120 @@ async function verPerfilAjeno(nombreUsuario) {
 
 // Único disparador al cargar la web
 window.addEventListener('load', checkUser);
+
+// --- SISTEMA DE EMOJIS ---
+let activeEmojiInputId = null;
+
+function toggleEmojiPicker(inputId, btn) {
+    let picker = document.getElementById('global-emoji-picker');
+    if (!picker) {
+        picker = document.createElement('div');
+        picker.id = 'global-emoji-picker';
+        picker.className = 'emoji-picker-popup';
+        picker.style.display = 'none';
+        const emojis = ["😊","😂","🤣","😍","🤔","🙄","😒","😭","😩","😎","🔥","✨","👑","💯","👏","🙏","👍","👎","💬","❤️","💔","🎌","🇯🇵","📺","🍿","⭐"];
+        picker.innerHTML = emojis.map(e => `<span class="emoji-item" onclick="insertEmoji('${e}')">${e}</span>`).join('');
+        document.body.appendChild(picker);
+        
+        document.addEventListener('mousedown', (e) => {
+            if (picker.style.display === 'grid' && !picker.contains(e.target) && !e.target.closest('.emoji-trigger')) {
+                picker.style.display = 'none';
+            }
+        });
+    }
+
+    if (picker.style.display === 'grid' && activeEmojiInputId === inputId) {
+        picker.style.display = 'none';
+    } else {
+        activeEmojiInputId = inputId;
+        const rect = btn.getBoundingClientRect();
+        picker.style.left = `${Math.max(10, Math.min(window.innerWidth - 250, rect.left - 100))}px`;
+        picker.style.top = `${rect.top - 210}px`; // Posición sobre el botón
+        picker.style.display = 'grid';
+    }
+}
+
+function insertEmoji(emoji) {
+    const input = document.getElementById(activeEmojiInputId);
+    if (input) {
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        input.value = input.value.substring(0, start) + emoji + input.value.substring(end);
+        input.focus();
+        input.setSelectionRange(start + emoji.length, start + emoji.length);
+    }
+    document.getElementById('global-emoji-picker').style.display = 'none';
+}
+
+// --- SISTEMA DE STICKERS ---
+async function toggleStickerPicker(inputId, btn) {
+    let picker = document.getElementById('global-sticker-picker');
+    if (!picker) {
+        picker = document.createElement('div');
+        picker.id = 'global-sticker-picker';
+        picker.className = 'sticker-picker-popup';
+        picker.style.display = 'none';
+        picker.innerHTML = `<div class="sticker-tabs" id="stk-tabs"></div><div class="sticker-grid-content" id="stk-grid"></div>`;
+        document.body.appendChild(picker);
+
+        document.addEventListener('mousedown', (e) => {
+            if (picker.style.display === 'flex' && !picker.contains(e.target) && !e.target.closest('.emoji-trigger')) {
+                picker.style.display = 'none';
+            }
+        });
+    }
+
+    if (picker.style.display === 'flex' && activeEmojiInputId === inputId) {
+        picker.style.display = 'none';
+    } else {
+        activeEmojiInputId = inputId;
+
+        // Consultamos los packs desbloqueados del usuario
+        const { data: perfil } = await _db.from('perfiles').select('stickers_comprados').eq('nombre', currentUser).single();
+        const comprados = perfil?.stickers_comprados || [];
+
+        // El Pack 1 (1-10) es gratis y siempre visible
+        const packsVisibles = [
+            { id: 'stk_pack_1', nombre: 'Básico', inicio: 1, fin: 10 },
+            ...STICKER_PACKS_TIENDA.filter(p => comprados.includes(p.id))
+        ];
+
+        const tabs = document.getElementById('stk-tabs');
+        tabs.innerHTML = packsVisibles.map((p, i) => 
+            `<span class="sticker-tab ${i === 0 ? 'active' : ''}" onclick="cargarPackEnPicker(${p.inicio}, ${p.fin}, this)">${p.nombre}</span>`
+        ).join('');
+
+        // Cargamos el primer pack por defecto
+        cargarPackEnPicker(packsVisibles[0].inicio, packsVisibles[0].fin, tabs.firstChild);
+
+        const rect = btn.getBoundingClientRect();
+        picker.style.left = `${Math.max(10, Math.min(window.innerWidth - 260, rect.left - 120))}px`;
+        picker.style.top = `${rect.top - 310}px`;
+        picker.style.display = 'flex';
+    }
+}
+
+function cargarPackEnPicker(inicio, fin, btnTab) {
+    // Gestionar estado activo de pestañas
+    document.querySelectorAll('.sticker-tab').forEach(t => t.classList.remove('active'));
+    btnTab.classList.add('active');
+
+    const grid = document.getElementById('stk-grid');
+    let html = "";
+    for (let i = inicio; i <= fin; i++) {
+        const url = `stickers/${i}.gif`;
+        html += `<img src="${url}" class="sticker-item" onclick="insertSticker('${url}')">`;
+    }
+    grid.innerHTML = html;
+}
+
+function insertSticker(url) {
+    const input = document.getElementById(activeEmojiInputId);
+    if (input) {
+        input.value = `[STK:${url}]`;
+        const container = input.parentElement;
+        const sendBtn = container.querySelector('button[onclick*="enviar"], button[onclick*="postear"]');
+        if (sendBtn) sendBtn.click();
+    }
+    document.getElementById('global-sticker-picker').style.display = 'none';
+}

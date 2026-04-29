@@ -10,7 +10,7 @@
     
     <link rel="stylesheet" href="style.css">
 
-    <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://sdk.mercadopago.com/js/v2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
     </head>
 <body>
@@ -206,12 +206,13 @@
 
 <div id="modal-normas" class="modal-gold-overlay" style="display:none;">
     <div class="modal-gold-card">
-        <h3 class="section-title-gold centered">🛡️ NORMAS DE AIDUME</h3>
+        <h3 class="section-title-gold centered">🛡️ CÓDIGO DE HONOR AIDUME</h3>
         <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 300px; overflow-y: auto; padding-right: 10px;">
-            <p>1. <b>Respeto:</b> Sin insultos a otros fans.</p>
-            <p>2. <b>Spoilers:</b> No publicar spoilers sin avisar.</p>
-            <p>3. <b>Reportes:</b> El uso indebido de reportes causará el baneo de tu cuenta.</p>
-            <p>4. <b>Autoridad:</b> Las decisiones de Admins son inapelables.</p>
+            <p>✨ <b>Respeto ante todo:</b> La comunidad la hacemos todos. Se prohíben insultos, acoso o actitudes tóxicas hacia otros usuarios. Tratemos a los demás como nos gustaría que nos traten.</p>
+            <p>🚫 <b>Zona Libre de Spoilers:</b> No arruines la experiencia ajena. Si vas a comentar algo importante de la trama, usa advertencias claras. ¡Mantengamos el misterio vivo!</p>
+            <p>⚖️ <b>Uso Responsable de Reportes:</b> El sistema de reportes es para mantener la paz, no para bromas. Los reportes falsos resultarán en la suspensión inmediata de tu cuenta.</p>
+            <p>👑 <b>Palabra de Administrador:</b> Nuestros moderadores velan por la seguridad de todos. Sus decisiones y criterios son definitivos para mantener el orden.</p>
+            <p>🌟 <b>Disfruta la Experiencia:</b> AiduMe es un espacio para fans. Comparte, disfruta tus animes favoritos y ayuda a que la comunidad crezca.</p>
         </div>
         <button onclick="cerrarModalNormas()" class="action-btn" style="margin-top: 20px;">ENTENDIDO</button>
     </div>
@@ -222,6 +223,8 @@
         <h3 id="privado-titulo" class="section-title-gold centered" style="margin-bottom: 10px;">💬 Chat con Amigo</h3>
         <div id="privado-mensajes" style="flex: 1; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
         <div class="chat-input-area" style="background: transparent; padding: 0;">
+            <button class="emoji-trigger" onclick="toggleEmojiPicker('privado-input', this)"><img src="300.png" alt=""></button>
+            <button class="emoji-trigger" onclick="toggleStickerPicker('privado-input', this)"><img src="301.png" alt=""></button>
             <input type="text" id="privado-input" placeholder="Escribe un mensaje..." style="flex: 1; background: #222; border: 1px solid var(--gold); color: white; padding: 10px; border-radius: 8px; outline: none;">
             <button onclick="enviarMensajePrivado()" style="background: var(--gold); border: none; border-radius: 8px; padding: 10px 15px; cursor: pointer;">🚀</button>
         </div>
@@ -259,15 +262,12 @@
                 <h4 style="color:var(--gold); margin:0 0 15px 0; font-size:0.85rem; text-align:center;">💳 PAGO SEGURO CIFRADO</h4>
                 
                 <div class="input-group-admin">
-                    <div class="card-input-wrapper">
-                        <input type="text" id="card-number" placeholder="0000 0000 0000 0000" class="modern-input" maxlength="19" style="width:100%; box-sizing:border-box;">
-                        <i class="fas fa-credit-card"></i>
-                    </div>
-                    <input type="text" id="card-name" placeholder="NOMBRE COMO FIGURA EN TARJETA" class="modern-input" style="width:100%; box-sizing:border-box; text-transform:uppercase;">
+                    <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">NOMBRE DEL TITULAR</label>
+                    <input type="text" id="card-name" placeholder="TAL CUAL APARECE EN LA TARJETA" class="modern-input" style="width:100%; box-sizing:border-box; text-transform:uppercase; margin-bottom: 15px;">
                     
-                    <div class="card-form-grid">
-                        <input type="text" id="card-expiry" placeholder="MM/AA" class="modern-input" maxlength="5" style="width:100%; box-sizing:border-box; text-align:center;">
-                        <input type="password" id="card-cvc" placeholder="CVC" class="modern-input" maxlength="4" style="width:100%; box-sizing:border-box; text-align:center;">
+                    <label style="color:var(--gold); font-size:0.75rem; font-weight:bold; margin-bottom:5px; display:block;">DATOS DE LA TARJETA</label>
+                    <div id="card-element">
+                        <!-- Stripe inyectará el campo seguro aquí -->
                     </div>
                 </div>
 
@@ -302,6 +302,12 @@
 
             <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">✨ SKINS PARA CHAT</h4>
             <div id="tienda-temas-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+
+            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🖼️ PAQUETES DE STICKERS</h4>
+            <div id="tienda-stickers-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
+
+            <h4 style="color:var(--gold); font-size: 0.75rem; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px;">🖼️ PAQUETES DE STICKERS</h4>
+            <div id="tienda-stickers-grid" class="avatar-selector-grid" style="max-height: 200px; overflow-y: auto; padding-right:5px;"></div>
 
             <button onclick="cerrarTienda()" class="action-btn" style="margin-top: 20px; background: #222; color: white; border: 1px solid #444;">Cerrar</button>
         </div>
@@ -354,6 +360,13 @@
                 <button onclick="suspenderUsuarioDinamico()" class="btn-filter-flv" style="background: #ff8c00; flex: 1;">Suspender</button>
                 <button onclick="suspenderUsuario(0)" class="btn-filter-flv" style="background: #e50914; flex: 1;">Banear Permanente</button>
             </div>
+        </div>
+        <div class="admin-card" style="background: var(--card); padding: 20px; border-radius: 15px; border: 1px solid var(--gold); margin-top: 20px;">
+            <h3 class="section-title-gold" style="color:var(--gold); margin-top: 0;">🚀 Actualización de App</h3>
+            <p style="font-size: 0.8rem; color: #aaa; margin-bottom: 15px; text-align: center;">
+                Notifica a todos los usuarios que hay una nueva versión disponible y fuerza la recarga de la aplicación.
+            </p>
+            <button onclick="triggerAppUpdate()" class="btn-filter-flv" style="background: #007bff; width: 100%;">FORZAR ACTUALIZACIÓN</button>
         </div>
         <h3 class="section-title-gold" style="color:var(--gold); margin-top: 25px;">Comentarios Recientes</h3>
         <div id="admin-lista-comentarios" class="settings-container"></div>
@@ -425,6 +438,8 @@
             <div class="comments-section" style="margin-top:20px; border-top:1px solid rgba(255,255,255,0.1); padding-top:15px;">
                 <h4 style="color:var(--gold); margin-bottom: 10px;">💬 Comentarios</h4>
                 <div class="modern-input-group" style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="emoji-trigger" onclick="toggleEmojiPicker('comment-input', this)"><img src="300.png" alt=""></button>
+                    <button class="emoji-trigger" onclick="toggleStickerPicker('comment-input', this)"><img src="301.png" alt=""></button>
                     <input type="text" id="comment-input" placeholder="¿Qué opinas de este anime?" 
                            style="flex: 1; padding: 10px; border-radius: 8px; border: none; background: rgba(255,255,255,0.1); color: white; outline: none;">
                     <button onclick="postearComentario()" style="background: var(--gold); border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; color: black;">
@@ -448,6 +463,8 @@
     </div>
     <div id="chat-messages"></div>
     <div class="chat-input-area">
+        <button class="emoji-trigger" onclick="toggleEmojiPicker('chat-input', this)"><img src="300.png" alt=""></button>
+        <button class="emoji-trigger" onclick="toggleStickerPicker('chat-input', this)"><img src="301.png" alt=""></button>
         <input type="text" id="chat-input" placeholder="Escribe algo..." onkeypress="if(event.key==='Enter') enviarMensajeChat()">
         <button onclick="enviarMensajeChat()">🚀</button>
     </div>
@@ -475,12 +492,13 @@
 
 <div id="modal-confirmar-normas" class="modal-gold-overlay" style="display:none;">
     <div class="modal-gold-card">
-        <h3 class="section-title-gold centered">📜 REGLAMENTO DE ORO</h3>
+        <h3 class="section-title-gold centered">🛡️ CÓDIGO DE HONOR AIDUME</h3>
         <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 250px; overflow-y: auto; padding-right: 10px; margin-bottom: 20px;">
-            <p>1. <b>Respeto:</b> Sin insultos a otros fans.</p>
-            <p>2. <b>Spoilers:</b> No publicar spoilers sin avisar.</p>
-            <p>3. <b>Reportes:</b> El uso indebido causa baneo.</p>
-            <p>4. <b>Autoridad:</b> Las decisiones de Admins son inapelables.</p>
+            <p>✨ <b>Respeto ante todo:</b> Prohibidos los insultos, acoso o actitudes tóxicas.</p>
+            <p>🚫 <b>Zona Libre de Spoilers:</b> No arruines la experiencia ajena. Usa advertencias claras.</p>
+            <p>⚖️ <b>Uso Responsable de Reportes:</b> Reportes falsos o malintencionados causan baneo.</p>
+            <p>👑 <b>Palabra de Administrador:</b> Las decisiones de moderadores son definitivas.</p>
+            <p>🌟 <b>Disfruta la Experiencia:</b> Comparte y disfruta en un espacio sano para fans.</p>
         </div>
         <div style="display:flex; gap:10px;">
             <button onclick="aceptarNormasRegistro()" class="btn-filter-flv" style="flex:1;">ACEPTO</button>

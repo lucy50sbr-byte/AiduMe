@@ -4,11 +4,19 @@ let paginaActualTodos = 1;
 let idiomaActual = 'sub';
 let ultimoEpisodioCargado = null;
 let privateChatSubscription = null; // Variable global para la suscripción al chat privado
+let lastAppVersionChecked = null; // Para controlar la versión de la app
+let paginaFiltros = 1;
 let chatAmigoActual = null; // Usuario con el que se chatea en privado
 let wpChatChannel = null; // Canal de chat temporal
 
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
+
+function parsearMensajeParaStickers(texto) {
+    if (!texto) return "";
+    const regex = /\[STK:([^\]]+)\]/g;
+    return texto.replace(regex, '<img src="$1" class="chat-sticker">');
+}
 
 async function initApp() {
     await cargarDuelo();
@@ -18,7 +26,6 @@ async function initApp() {
     cargarGenerosEnPanel();
     activarNotificacionesEnVivo();
     iniciarContadorOnline();
-    cargarRankingSemanal();
     verificarPagoAutomatico();
     verificarRachaDias();
     
@@ -26,12 +33,21 @@ async function initApp() {
     actualizarEstadoConexion(); 
     setInterval(actualizarEstadoConexion, 60000); // Actualiza cada 1 min
     
+    checkForAppUpdate(); // Verifica actualizaciones al iniciar
     setInterval(cargarUltimosEpisodios, 600000); // Refresca episodios cada 10 min
     setInterval(cargarHome, 604800000); // Actualización automática del Top 10 cada semana (7 días)
 
     escucharSolicitudesAmistad();
     actualizarNotificacionesPerfil(); 
     escucharNotificacionesGlobales();
+
+    // Refrescar automáticamente la vista de perfil (estados online) si está abierta
+    setInterval(() => {
+        const perfilPage = document.getElementById('perfil');
+        if (perfilPage && perfilPage.classList.contains('active-page')) {
+            actualizarPerfilDesdeSQL();
+        }
+    }, 30000); // Cada 30 segundos
 
     // Auto-abrir anime desde notificación
     const params = new URLSearchParams(window.location.search);
@@ -337,6 +353,49 @@ function escucharSolicitudesAmistad() {
     }).subscribe();
 }
 
+/**
+ * Permite al dueño forzar una actualización de la aplicación para todos los usuarios.
+ * Esto se logra actualizando un valor en Supabase que los clientes verifican.
+ */
+async function triggerAppUpdate() {
+    const confirmar = await goldAlert({
+        title: "FORZAR ACTUALIZACIÓN",
+        text: "¿Estás seguro de que quieres forzar una actualización para TODOS los usuarios? Esto recargará la aplicación de todos.",
+        icon: "🚀",
+        showCancel: true,
+        confirmText: "SÍ, ACTUALIZAR AHORA"
+    });
+
+    if (!confirmar) return;
+
+    try {
+        const newVersionTimestamp = new Date().toISOString();
+        await _db.from('app_settings').upsert({
+            key: 'app_version',
+            value: newVersionTimestamp
+        }, { onConflict: 'key' });
+
+        goldAlert({ title: "ACTUALIZACIÓN ENVIADA", text: "La señal de actualización ha sido enviada. Los usuarios recargarán la app.", icon: "✔️" });
+    } catch (err) {
+        console.error("Error al forzar actualización:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo enviar la señal de actualización.", icon: "❌" });
+    }
+}
+
+/**
+ * Verifica si hay una nueva versión de la aplicación disponible y la recarga si es necesario.
+ */
+async function checkForAppUpdate() {
+    try {
+        const { data } = await _db.from('app_settings').select('value').eq('key', 'app_version').single();
+        if (data && data.value && data.value !== lastAppVersionChecked) {
+            lastAppVersionChecked = data.value;
+            console.log("🚀 Nueva versión detectada. Recargando aplicación...");
+            location.reload(true); // Recarga forzada, ignorando caché
+        }
+    } catch (err) { /* Ignorar errores, la app seguirá funcionando */ }
+}
+
 async function gestionarSolicitud(id, accion, nombreOtro) {
     if (accion === 'aceptar') {
         await _db.from('amistades').update({ estado: 'aceptada' }).eq('id', id);
@@ -385,6 +444,7 @@ function renderizarMensajesPrivados(mensajes) {
     const cont = document.getElementById('privado-mensajes');
     cont.innerHTML = mensajes.map(m => {
         const esMio = String(m.emisor).trim().toLowerCase() === String(currentUser).trim().toLowerCase();
+        const textoLimpio = parsearMensajeParaStickers(m.mensaje);
         
         // Icono de visto solo para mis mensajes (siempre se muestra)
         const checkIcon = esMio 
@@ -393,7 +453,7 @@ function renderizarMensajesPrivados(mensajes) {
 
         return `
             <div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">
-                ${m.mensaje} ${checkIcon}
+                ${textoLimpio} ${checkIcon}
             </div>`;
     }).join('');
     cont.scrollTop = cont.scrollHeight;
@@ -405,14 +465,17 @@ async function enviarMensajePrivado() {
     if (!texto || !chatAmigoActual || !currentUser) return;
 
     const { error } = await _db.from('chat_privado').insert([
-        { emisor: currentUser.trim(), receptor: chatAmigoActual.trim(), mensaje: texto }
+        { emisor: String(currentUser).trim(), receptor: String(chatAmigoActual).trim(), mensaje: texto }
     ]);
 
     if (!error) {
         input.value = "";
     } else {
-        console.error("Error enviando mensaje privado:", error);
-        goldAlert({ title: "ERROR", text: "No pudimos enviar el mensaje. Revisa tu conexión.", icon: "❌" });
+        console.error("🚨 Error Supabase:", error.code, error.message);
+        const msgError = error.code === '42501' 
+            ? "Error de permisos (RLS). Revisa las políticas en el dashboard de Supabase." 
+            : "No pudimos enviar el mensaje. Revisa tu conexión.";
+        goldAlert({ title: "ERROR", text: msgError, icon: "❌" });
     }
 }
 
@@ -462,7 +525,7 @@ function escucharChatPrivado() {
                     const cont = document.getElementById('privado-mensajes');
                     const esMio = emisor === uActual;
                     const checkIcon = esMio ? `<span class="seen-icon ${m.leido ? 'visto' : ''}">${m.leido ? '✔️✔️' : '✔️'}</span>` : '';
-                    cont.innerHTML += `<div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">${m.mensaje} ${checkIcon}</div>`;
+                    cont.innerHTML += `<div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">${parsearMensajeParaStickers(m.mensaje)} ${checkIcon}</div>`;
                     cont.scrollTop = cont.scrollHeight;
                 }
             }
@@ -502,7 +565,7 @@ async function actualizarEstadoConexion() {
         .ilike('nombre', currentUser.trim())
         .select(); // Forzamos a que devuelva datos para confirmar el cambio
 
-    if (error) console.error("Error al actualizar estado de conexión:", error);
+    if (error) console.error("🚨 Error de Latido (Online):", error.code, error.message);
     else {
         console.log("🟢 Latido (Heartbeat) enviado para:", currentUser);
     }
@@ -555,9 +618,21 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
         // Traer estados de conexión de los amigos
         let estados = [];
         if (nombresAmigos.length > 0) {
-            // Usamos .in() para traer a todos los amigos de una sola vez
-            const res = await _db.from('perfiles').select('nombre, ultima_conexion').in('nombre', nombresAmigos);
-            estados = res.data || [];
+            // MEJORA: Nombres entre comillas para evitar errores de sintaxis en el OR
+            const orClause = nombresAmigos.map(n => `nombre.ilike."${n.trim()}"`).join(',');
+            
+            const { data, error } = await _db.from('perfiles')
+                .select('nombre, ultima_conexion')
+                .or(orClause);
+            
+            if (error) {
+                console.error("Error cargando estados de amigos:", error);
+                // Respaldo por si el OR es muy largo
+                const resFallback = await _db.from('perfiles').select('nombre, ultima_conexion').in('nombre', nombresAmigos);
+                estados = resFallback.data || [];
+            } else {
+                estados = data || [];
+            }
         }
 
         console.log("🌐 Estados de conexión de amigos:", estados);
@@ -1000,7 +1075,6 @@ async function votarDuelo(index) {
 
         await actualizarMarcadorGlobal();
         await actualizarVotosUI();
-        cargarRankingSemanal();
         
     } catch (err) {
         console.error("Error al votar:", err.message);
@@ -1087,7 +1161,7 @@ function obtenerHtmlRacha(dias) {
     else if (dias >= 15 && dias < 30) { texto = "Demon"; clase = "racha-demon"; }
     else if (dias >= 30) { texto = "Overlord"; clase = "racha-overlord"; }
     
-    return `<span class="racha-item ${clase}" title="Racha de ${dias} días">🔥 <span class="racha-tag-text">${texto} ${dias}</span></span>`;
+    return `<span class="racha-item ${clase}" title="Racha de ${dias} días"><span class="racha-tag-text">${texto} ${dias}</span></span>`;
 }
 
 /**
@@ -1095,73 +1169,6 @@ function obtenerHtmlRacha(dias) {
  * y revela al ganador los Domingos (Estilo UFA).
  */
 async function cargarRankingSemanal() {
-    const ahora = new Date();
-    const diaSemana = ahora.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
-    const semanaActual = getWeekNumber(ahora);
-    
-    const battleSection = document.getElementById('battle-section');
-    if (!battleSection) return;
-
-    let rankingCont = document.getElementById('ranking-torneo-container');
-    if (!rankingCont) {
-        rankingCont = document.createElement('div');
-        rankingCont.id = 'ranking-torneo-container';
-        battleSection.appendChild(rankingCont);
-    }
-
-    try {
-        const { data: votos, error } = await _db
-            .from('torneo_votos')
-            .select('anime_id, anime_titulo')
-            .eq('semana_voto', semanaActual);
-
-        if (error) throw error;
-
-        const conteo = votos.reduce((acc, v) => {
-            if (!acc[v.anime_id]) acc[v.anime_id] = { id: v.anime_id, titulo: v.anime_titulo, votos: 0 };
-            acc[v.anime_id].votos++;
-            return acc;
-        }, {});
-
-        const listaRanking = Object.values(conteo).sort((a, b) => b.votos - a.votos).slice(0, 5);
-
-        if (diaSemana === 0) { // DOMINGO: MODO GANADOR
-            const ganador = listaRanking[0];
-            const battleItems = document.querySelector('.battle-items');
-            const battleStatus = document.getElementById('battle-timer');
-            const votosRestantes = document.getElementById('votos-restantes')?.closest('p');
-            
-            if (battleItems) battleItems.style.display = 'none';
-            if (battleStatus) battleStatus.innerHTML = "👑 EL REY DE LA SEMANA 👑";
-            if (votosRestantes) votosRestantes.style.display = 'none';
-
-            rankingCont.innerHTML = `
-                <div class="winner-card-ufa">
-                    <div style="font-size:3.5rem; margin-bottom:15px; filter: drop-shadow(0 0 10px gold);">🏆</div>
-                    <h2 style="color:var(--gold); font-size:1.8rem; margin:10px 0; text-transform:uppercase; letter-spacing:2px;">
-                        ${ganador?.titulo || "Calculando..."}
-                    </h2>
-                    <p style="color:#eee; font-size:1rem; opacity:0.8;">
-                        Se corona campeón con <b>${ganador?.votos || 0}</b> votos de la comunidad.
-                    </p>
-                    <div style="margin-top:20px; font-size:0.7rem; color:var(--gold); opacity:0.5; letter-spacing:3px;">
-                        EL NUEVO TORNEO COMIENZA MAÑANA (LUNES)
-                    </div>
-                </div>`;
-        } else { // LUNES A SÁBADO: MODO RANKING
-            rankingCont.className = 'ranking-container';
-            let rankingHtml = `<h3 style="color:var(--gold); font-size:0.75rem; text-align:center; margin-bottom:15px; letter-spacing:2px; font-weight:900;">📊 RANKING GLOBAL DE LA SEMANA</h3><div id="ranking-torneo-lista">`;
-            if (listaRanking.length === 0) {
-                rankingHtml += `<p style="text-align:center; opacity:0.4; font-size:0.8rem; padding:10px;">Aún no hay votos registrados esta semana.</p>`;
-            } else {
-                listaRanking.forEach((item, index) => {
-                    rankingHtml += `<div class="ranking-item"><div class="ranking-pos">${index + 1}</div><div class="ranking-info"><span class="ranking-title">${item.titulo}</span><span class="ranking-votes">${item.votos} VOTOS REGISTRADOS</span></div><div style="color:var(--gold); font-size:1.2rem;">${index === 0 ? '🔥' : ''}</div></div>`;
-                });
-            }
-            rankingHtml += `</div>`;
-            rankingCont.innerHTML = rankingHtml;
-        }
-    } catch (e) { console.error("Error al cargar ranking estilo UFA:", e); }
 }
 
 // Función necesaria para calcular la semana (ISO Week)
@@ -1368,7 +1375,7 @@ function renderizarComentarios(comentarios, contenedor) {
                             style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
                         @${x.usuario} ${esPremium ? '👑' : ''}
                     </strong>
-                    <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word;">${x.comentario}</span>
+                    <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word;">${parsearMensajeParaStickers(x.comentario)}</span>
                 </div>
                 <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
             </div>`; 
@@ -1711,8 +1718,9 @@ function cargarGenerosEnPanel() {
     });
 }
 
-async function aplicarFiltrosAvanzados() {
+async function aplicarFiltrosAvanzados(pagina = 1) {
     // Obtenemos los valores de los nuevos selectores
+    paginaFiltros = pagina;
     const genre = document.getElementById('filter-genre-select').value;
     const status = document.getElementById('filter-status').value;
     const order = document.getElementById('filter-order').value;
@@ -1747,7 +1755,7 @@ async function aplicarFiltrosAvanzados() {
             </div>`;
     }
 
-    let url = `https://api.jikan.moe/v4/anime?order_by=${order}&sort=desc&limit=24`;
+    let url = `https://api.jikan.moe/v4/anime?order_by=${order}&sort=desc&limit=24&page=${paginaFiltros}`;
     
     if (genre) url += `&genres=${genre}`;
     if (status) url += `&status=${status}`;
@@ -1758,6 +1766,7 @@ async function aplicarFiltrosAvanzados() {
 
         if (j.data && j.data.length > 0) {
             renderGrid(j.data, 'lista-todos');
+            renderPaginacionFiltros(j.pagination);
         } else {
             listaTodos.innerHTML = `
                 <div style="text-align:center; padding:40px; width:100%;">
@@ -1768,6 +1777,8 @@ async function aplicarFiltrosAvanzados() {
 
         const pBusquedaExistente = document.getElementById('paginacion-busqueda');
         if (pBusquedaExistente) pBusquedaExistente.remove();
+        const pNormalExistente = document.getElementById('paginacion-container');
+        if (pNormalExistente) pNormalExistente.style.display = 'none';
     } catch (e) {
         console.error("Error al filtrar:", e);
         goldAlert({
@@ -1776,6 +1787,25 @@ async function aplicarFiltrosAvanzados() {
             icon: "❌"
         });
     }
+}
+
+function renderPaginacionFiltros(info) {
+    let contenedorFiltros = document.getElementById('paginacion-filtros');
+    if (contenedorFiltros) contenedorFiltros.remove();
+
+    if (!info.has_next_page && paginaFiltros === 1) return;
+
+    contenedorFiltros = document.createElement('div');
+    contenedorFiltros.id = 'paginacion-filtros';
+    contenedorFiltros.style = "display: flex; justify-content: center; align-items: center; gap: 20px; margin: 30px 0; padding-bottom: 20px;";
+
+    contenedorFiltros.innerHTML = `
+        <button onclick="aplicarFiltrosAvanzados(${paginaFiltros - 1})" class="btn-random-gold" ${paginaFiltros === 1 ? 'disabled style="opacity:0.5"' : ''}>❮ Anterior</button>
+        <span style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página ${paginaFiltros}</span>
+        <button onclick="aplicarFiltrosAvanzados(${paginaFiltros + 1})" class="btn-random-gold" ${!info.has_next_page ? 'disabled style="opacity:0.5"' : ''}>Siguiente ❯</button>
+    `;
+
+    document.getElementById('lista-todos').after(contenedorFiltros);
 }
 
 let paginaBusqueda = 1; // Variable global para controlar la página de búsqueda
@@ -1799,6 +1829,8 @@ async function buscarAnimeLive(pagina = 1) {
         // Eliminamos los botones de paginación de búsqueda si existen
         const pBusquedaExistente = document.getElementById('paginacion-busqueda');
         if (pBusquedaExistente) pBusquedaExistente.remove();
+        const pFiltrosExistente = document.getElementById('paginacion-filtros');
+        if (pFiltrosExistente) pFiltrosExistente.remove();
 
         return cargarHome(); 
     }
@@ -1807,6 +1839,9 @@ async function buscarAnimeLive(pagina = 1) {
     if (seccionTop10) seccionTop10.style.display = 'none';
     if (paginacionNormal) paginacionNormal.style.display = 'none';
     
+    const pFiltrosExistente = document.getElementById('paginacion-filtros');
+    if (pFiltrosExistente) pFiltrosExistente.remove();
+
     if (tituloTodos) tituloTodos.innerText = `Resultados para: "${q}" (Pág. ${paginaBusqueda})`;
 
     // Fetch a Jikan: order_by=popularity & sort=asc (para que el #1 sea el primero)
@@ -2475,9 +2510,9 @@ async function reproducirEpisodio(titulo, num) {
         let urlSucia = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
         let urlFinal = "";
 
-        if (urlSucia.includes("<iframe")) {
-            // Extraemos solo lo que está dentro de src="..."
-            const match = urlSucia.match(/src=["']([^"']+)["']/);
+        if (urlSucia.toLowerCase().includes("<iframe")) {
+            // Extraemos solo lo que está dentro de src="..." (insensible a mayúsculas y flexible con comillas)
+            const match = urlSucia.match(/src=["']?([^"'\s>]+)["']?/i);
             urlFinal = (match && match[1]) ? match[1] : urlSucia;
         } else {
             urlFinal = urlSucia;
@@ -2822,6 +2857,13 @@ async function toggleChat() {
     const isOpen = win.style.display === 'flex';
     
     win.style.display = isOpen ? 'none' : 'flex';
+
+    if (isOpen) {
+        const pkStk = document.getElementById('global-sticker-picker');
+        const pkEmo = document.getElementById('global-emoji-picker');
+        if (pkStk) pkStk.style.display = 'none';
+        if (pkEmo) pkEmo.style.display = 'none';
+    }
     
     if(!isOpen) {
         const ahora = new Date().toISOString();
@@ -2853,7 +2895,11 @@ async function toggleChat() {
 window.addEventListener('click', (e) => {
     const win = document.getElementById('chat-window');
     const bubble = document.getElementById('chat-bubble');
-    if (win?.style.display === 'flex' && !win.contains(e.target) && !bubble.contains(e.target)) {
+    const picker = document.getElementById('global-emoji-picker');
+    const stickerPicker = document.getElementById('global-sticker-picker');
+
+    // Si el chat está abierto, cerramos solo si el clic NO es en la ventana, ni en la burbuja, ni en los selectores
+    if (win?.style.display === 'flex' && !win.contains(e.target) && !bubble.contains(e.target) && (!picker || !picker.contains(e.target)) && (!stickerPicker || !stickerPicker.contains(e.target))) {
         toggleChat();
     }
 });
@@ -2935,7 +2981,7 @@ async function cargarMensajesChat() {
             // Lógica de mensajes nuevos y menciones
             if (m.fecha > ultimaVezLeido) nuevosCount++;
             
-            let textoMsj = m.mensaje;
+            let textoMsj = parsearMensajeParaStickers(m.mensaje);
             const regexMencion = new RegExp(`@${currentUser}`, 'i');
             const soyYoArrobado = currentUser && regexMencion.test(m.mensaje);
             
@@ -3187,6 +3233,8 @@ async function buscarAnimeFusion(pagina = 1) {
         // Limpiamos la paginación de búsqueda
         const pBusquedaExistente = document.getElementById('paginacion-busqueda');
         if (pBusquedaExistente) pBusquedaExistente.remove();
+        const pFiltrosExistente = document.getElementById('paginacion-filtros');
+        if (pFiltrosExistente) pFiltrosExistente.remove();
 
         return cargarHome(); 
     }
@@ -3197,6 +3245,9 @@ async function buscarAnimeFusion(pagina = 1) {
     if (seccionRecientes) seccionRecientes.style.display = 'none';
     if (paginacionNormal) paginacionNormal.style.display = 'none';
     
+    const pFiltrosExistente = document.getElementById('paginacion-filtros');
+    if (pFiltrosExistente) pFiltrosExistente.remove();
+
     // Estilo de búsqueda Gold
     if (tituloTodos) {
         tituloTodos.innerHTML = `🔍 RASTREANDO: <span style="color:white;">${q.toUpperCase()}</span>`;
