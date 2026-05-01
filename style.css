@@ -168,6 +168,8 @@ header {
     margin-bottom: 25px;
     transition: all 0.3s ease;
     align-items: center;
+    box-sizing: border-box;
+    width: 100%;
 }
 
 .modern-input-group:focus-within {
@@ -178,6 +180,7 @@ header {
 
 #comment-input {
     flex: 1;
+    min-width: 0;
     background: transparent;
     border: none;
     color: white;
@@ -1325,35 +1328,6 @@ header {
     border-radius: 8px;
 }
 
-/* --- SISTEMA DE TARJETAS MERCADO PAGO (FIX DE INTERACCIÓN) --- */
-.mp-card-field-container {
-    background: #111 !important;
-    border: 1.5px solid var(--gold) !important;
-    color: white;
-    outline: none;
-    transition: 0.3s;
-    border-radius: 8px;
-    height: 45px;
-    position: relative;
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-    overflow: hidden;
-    z-index: 1;
-}
-
-.mp-card-field-container iframe {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    display: block !important;
-    pointer-events: auto !important;
-    background: transparent !important;
-    border: none !important;
-    z-index: 10 !important;
-}
 .video-clipper {
     position: relative;
     width: 100%;
@@ -1975,32 +1949,31 @@ header {
 }
 
 /* --- SISTEMA DE TARJETAS --- */
-.card-form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 10px;
-}
-
-.card-input-wrapper {
-    position: relative;
+/* Contenedor para los campos de tarjeta de Mercado Pago */
+.mp-card-field-container {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    border-radius: 8px;
+    height: 45px; /* Altura fija para los iframes */
+    display: block;
     width: 100%;
+    box-sizing: border-box;
+    overflow: hidden; /* Asegura que el contenido del iframe no se desborde */
+    position: relative; /* Para posicionar el iframe dentro */
+    transition: border-color 0.3s, box-shadow 0.3s;
 }
 
-.card-input-wrapper i {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--gold);
-    opacity: 0.5;
+.mp-card-field-container:focus-within {
+    border-color: var(--gold);
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
 }
 
-.payment-method-btn {
-    flex: 1;
-    padding: 10px;
-    font-size: 0.7rem;
-    margin: 0;
+/* Estilo para los iframes de Mercado Pago dentro de los contenedores */
+.mp-card-field-container iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: none !important;
+    background: transparent !important;
 }
 
 /* --- TEMAS DE CHAT (SKINS) --- */
@@ -2374,3 +2347,25 @@ header {
 .racha-devil .racha-tag-text { background-image: linear-gradient(90deg, #c0392b, #ff4d4d, #c0392b); }
 .racha-demon .racha-tag-text { background-image: linear-gradient(90deg, #111, #ff0000, #111); }
 .racha-overlord .racha-tag-text { background-image: linear-gradient(90deg, #000, var(--gold), #000); }
+
+/* --- BOTÓN TRANSMITIR (TV CAST) --- */
+.btn-cast-gold {
+    background: rgba(255, 215, 0, 0.1);
+    border: 1.5px solid var(--gold);
+    color: var(--gold);
+    padding: 6px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: 0.3s;
+    display: inline-flex;
+    align-items: center;
+    font-weight: 900;
+    font-size: 0.7rem;
+    gap: 6px;
+    text-transform: uppercase;
+}
+.btn-cast-gold:hover {
+    background: var(--gold);
+    color: black;
+    box-shadow: 0 0 15px var(--gold);
+}

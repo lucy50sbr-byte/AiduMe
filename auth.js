@@ -196,6 +196,11 @@ function cerrarSesion() {
         });
 
         if (confirmar) {
+            // Marcamos como offline en la base de datos antes de limpiar el local
+            if (currentUser) {
+                await _db.from('perfiles').update({ online: false }).ilike('nombre', currentUser);
+            }
+
         localStorage.clear();
         const chatBubble = document.getElementById('chat-bubble');
         if (chatBubble) chatBubble.style.display = 'none';

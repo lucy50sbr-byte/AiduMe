@@ -8,6 +8,7 @@ let lastAppVersionChecked = null; // Para controlar la versión de la app
 let paginaFiltros = 1;
 let chatAmigoActual = null; // Usuario con el que se chatea en privado
 let wpChatChannel = null; // Canal de chat temporal
+let urlTransmisionActual = null; // URL para enviar a la TV
 
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
@@ -26,7 +27,6 @@ async function initApp() {
     cargarGenerosEnPanel();
     activarNotificacionesEnVivo();
     iniciarContadorOnline();
-    verificarPagoAutomatico();
     verificarRachaDias();
     
     // --- ESTADO ONLINE ---
@@ -45,9 +45,10 @@ async function initApp() {
     setInterval(() => {
         const perfilPage = document.getElementById('perfil');
         if (perfilPage && perfilPage.classList.contains('active-page')) {
-            actualizarPerfilDesdeSQL();
+            // Ahora refrescamos el perfil que esté realmente en pantalla
+            actualizarPerfilDesdeSQL(usuarioEnPantalla || currentUser);
         }
-    }, 30000); // Cada 30 segundos
+    }, 300000); // Cada 5 minutos
 
     // Auto-abrir anime desde notificación
     const params = new URLSearchParams(window.location.search);
@@ -58,6 +59,25 @@ async function initApp() {
         showDetails({ mal_id: parseInt(openId) });
     }
 }
+
+// --- MEJORA: Intento de cierre automático al cerrar ventana ---
+window.addEventListener('beforeunload', () => {
+    if (currentUser) {
+        // Usamos fetch con keepalive para asegurar que la petición se complete 
+        // incluso si la pestaña se cierra instantáneamente.
+        const url = `${_supabaseUrl}/rest/v1/perfiles?nombre=ilike.${encodeURIComponent(currentUser.trim())}`;
+        fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'apikey': _supabaseKey,
+                'Authorization': `Bearer ${_supabaseKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ online: false }),
+            keepalive: true
+        });
+    }
+});
 
 async function cargarHome() {
     // Cambia esto en cargarHome() para que sea el Top de la Temporada Actual
@@ -561,7 +581,10 @@ function cerrarChatPrivado() {
 async function actualizarEstadoConexion() {
     if (!currentUser) return;
     const { error } = await _db.from('perfiles')
-        .update({ ultima_conexion: new Date().toISOString() }) 
+        .update({ 
+            ultima_conexion: new Date().toISOString(),
+            online: true 
+        }) 
         .ilike('nombre', currentUser.trim())
         .select(); // Forzamos a que devuelva datos para confirmar el cambio
 
@@ -622,7 +645,7 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
             const orClause = nombresAmigos.map(n => `nombre.ilike."${n.trim()}"`).join(',');
             
             const { data, error } = await _db.from('perfiles')
-                .select('nombre, ultima_conexion')
+                .select('nombre, online, ultima_conexion')
                 .or(orClause);
             
             if (error) {
@@ -641,23 +664,44 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
             nombresAmigos.forEach(amigo => {
                 const dataEst = estados?.find(e => e.nombre.toLowerCase() === amigo.toLowerCase());
                 
-                // Obtener mensajes no leídos de este amigo
-                const numNoLeidos = conteoNoLeidos[amigo.toLowerCase()] || 0;
-                const badgeNoLeidos = numNoLeidos > 0 ? `<span style="background:#ff4444; color:white; border-radius:50%; padding:2px 7px; font-size:0.65rem; font-weight:bold; margin-left:8px; box-shadow: 0 0 5px rgba(255,0,0,0.5);">${numNoLeidos}</span>` : '';
-
                 let esOnline = false;
                 let etiquetaTiempo = "Offline";
 
                 if (dataEst && dataEst.ultima_conexion) {
-                    // Parseamos la fecha de Supabase asegurando que se trate como UTC
-                    const ultimaConexion = new Date(dataEst.ultima_conexion).getTime();
+                    // --- PARSEO ROBUSTO DE FECHA (Sincronizado con lógica de chat) ---
+                    let isoStr = dataEst.ultima_conexion.trim().replace(" ", "T");
+                    if (!isoStr.endsWith('Z') && !isoStr.includes('+') && !isoStr.includes('-')) {
+                        isoStr += 'Z';
+                    }
+                    
+                    const fechaObj = new Date(isoStr);
+
+                    // Si la fecha es inválida (ej. si la DB aún devuelve solo '2026-05-01'),
+                    // entonces fechaObj.getTime() será NaN. Añadimos un log para depuración.
+                    if (isNaN(fechaObj.getTime())) {
+                        console.warn(`DEBUG AMIGOS: Fecha de última conexión inválida para ${amigo}: ${dataEst.ultima_conexion}`);
+                        return; // Salimos si la fecha no es válida
+                    }
+
+                    const ultimaConexion = fechaObj.getTime();
                     const ahora = Date.now();
                     
-                    // Usamos Math.abs para ignorar si un reloj está adelantado respecto al otro
                     const diferenciaMs = Math.abs(ahora - ultimaConexion);
                     
-                    // Si la diferencia es menor a 5 minutos (300,000 ms), está Online
-                    esOnline = diferenciaMs < 300000;
+                    console.log(`DEBUG AMIGOS: Usuario: ${amigo}`);
+                    console.log(`DEBUG AMIGOS: ultima_conexion (DB): ${dataEst.ultima_conexion}`);
+                    console.log(`DEBUG AMIGOS: fechaObj (parsed): ${fechaObj.toISOString()}`);
+                    console.log(`DEBUG AMIGOS: ahora (ms): ${ahora}`);
+                    console.log(`DEBUG AMIGOS: ultimaConexion (ms): ${ultimaConexion}`);
+                    console.log(`DEBUG AMIGOS: diferenciaMs: ${diferenciaMs} ms (${(diferenciaMs / 60000).toFixed(2)} min)`);
+                    
+                    // --- DOBLE CHECK: Flag Online Y latido reciente ---
+                    // Ajustado a 5 minutos (300,000 ms) para máxima precisión.
+                    // Si no hay actividad en 5 min, se considera Offline.
+                    esOnline = (dataEst.online === true && diferenciaMs < 300000);
+
+                    console.log(`DEBUG AMIGOS: dataEst.online: ${dataEst.online}`);
+                    console.log(`DEBUG AMIGOS: esOnline (calculated): ${esOnline}`);
 
                     if (esOnline) {
                         etiquetaTiempo = "Online";
@@ -665,10 +709,19 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
                         // Calculamos el tiempo relativo real
                         const diffMins = Math.floor(diferenciaMs / 60000);
                         if (diffMins < 60) etiquetaTiempo = `Hace ${diffMins} min`;
-                        else if (diffMins < 1440) etiquetaTiempo = `Hace ${Math.floor(diffMins / 60)}h`;
-                        else etiquetaTiempo = `Hace ${Math.floor(diffMins / 1440)}d`;
+                        else if (diffMins < 1440) {
+                            // Si fue hoy, mostramos la hora exacta en formato local (24hs)
+                            const horaLocal = fechaObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            etiquetaTiempo = `Hoy ${horaLocal}`;
+                        }
+                        else etiquetaTiempo = `Hace ${Math.floor(diffMins / 1440)} días`;
                     }
                 }
+
+                // --- MEJORA: Solo mostrar contador de mensajes si el amigo está Online ---
+                const numNoLeidosRaw = conteoNoLeidos[amigo.toLowerCase()] || 0;
+                const numNoLeidos = esOnline ? numNoLeidosRaw : 0;
+                const badgeNoLeidos = numNoLeidos > 0 ? `<span style="background:#ff4444; color:white; border-radius:50%; padding:2px 7px; font-size:0.65rem; font-weight:bold; margin-left:8px; box-shadow: 0 0 5px rgba(255,0,0,0.5);">${numNoLeidos}</span>` : '';
                 
                 html += `
                 <div class="friend-item">
@@ -2549,8 +2602,15 @@ async function reproducirEpisodio(titulo, num) {
 
         // 4. ACTUALIZAR TÍTULO E IDIOMA
         if (infoText) {
+            urlTransmisionActual = urlFinal;
             const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
-            infoText.innerHTML = `📺 Viendo: ${titulo} - Episodio ${num} <img src="${flag}" style="width:16px; vertical-align:middle; margin-left:5px;">`;
+            infoText.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left;">
+                    <span>📺 Viendo: ${titulo} - Ep ${num} <img src="${flag}" style="width:16px; vertical-align:middle;"></span>
+                    <button onclick="transmitirTV()" class="btn-cast-gold">
+                        <i>📡</i> TV
+                    </button>
+                </div>`;
         }
 
     } catch (err) {
@@ -2956,7 +3016,7 @@ async function cargarMensajesChat() {
         .from('chat_global')
         .select(`
             id, usuario, mensaje, fecha,
-            perfiles (avatar_id, es_premium, tema_chat, racha_dias)
+            perfiles (avatar_id, es_premium, tema_chat, racha_dias, online, ultima_conexion)
         `) // --- NUEVO: Traemos el estado premium desde perfiles ---
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
@@ -2977,6 +3037,30 @@ async function cargarMensajesChat() {
             const esPremium = perfilData?.es_premium;
             const avId = perfilData?.avatar_id || '1';
             const avData = todosLosAvatares.find(a => a.id === String(avId)) || AVATARES_RANGOS[0];
+
+            // --- LÓGICA ONLINE/OFFLINE (DOBLE CHECK DE SEGURIDAD) ---
+            let esOnlineDoble = false;
+            if (perfilData?.ultima_conexion) {
+                // --- PARSEO ROBUSTO DE FECHA DESDE SUPABASE ---
+                let isoStringChat = perfilData.ultima_conexion.trim().replace(" ", "T");
+                if (!isoStringChat.endsWith('Z') && !isoStringChat.includes('+') && !isoStringChat.includes('-')) {
+                    isoStringChat += 'Z';
+                }
+                const fechaObjChat = new Date(isoStringChat);
+                const latidoMs = Math.abs(Date.now() - fechaObjChat.getTime());
+
+                // --- DEBUGGING DE FECHAS EN CHAT (VER EN CONSOLA DEL NAVEGADOR) ---
+                console.log(`DEBUG CHAT: Usuario: ${m.usuario}`);
+                console.log(`DEBUG CHAT: Raw DB string: ${perfilData.ultima_conexion}`);
+                console.log(`DEBUG CHAT: Parsed ISO string: ${isoStringChat}`);
+                console.log(`DEBUG CHAT: fechaObjChat (Date object): ${fechaObjChat}`);
+                console.log(`DEBUG CHAT: fechaObjChat.toLocaleString() (Local): ${fechaObjChat.toLocaleString()}`);
+
+                // Sincronizamos el margen también en el chat (5 minutos)
+                esOnlineDoble = (perfilData?.online === true && latidoMs < 300000);
+            }
+            
+            const esOnline = esOnlineDoble;
             
             // Lógica de mensajes nuevos y menciones
             if (m.fecha > ultimaVezLeido) nuevosCount++;
@@ -3006,9 +3090,12 @@ async function cargarMensajesChat() {
 
             return `
             <div class="chat-msg-row">
-                <img src="${avData.img}" class="chat-avatar-mini" 
-                     onclick="verPerfilAjeno('${m.usuario}')" 
-                     style="cursor:pointer;">
+                <div style="position: relative; flex-shrink: 0;">
+                    <img src="${avData.img}" class="chat-avatar-mini" 
+                         onclick="verPerfilAjeno('${m.usuario}')" 
+                         style="cursor:pointer;">
+                    <span class="${esOnline ? 'online-dot' : 'offline-dot'}" style="position: absolute; top: -2px; right: -2px; border: 2px solid #111; margin: 0; box-sizing: content-box;"></span>
+                </div>
                 
                 <div class="chat-msg-body ${temaClase}" style="${estiloPremium}">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -3346,52 +3433,6 @@ window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confi
         if(showInput) setTimeout(() => input.focus(), 50);
     });
 };
-
-async function verificarPagoAutomatico() {
-    const params = new URLSearchParams(window.location.search);
-    // Mercado Pago suele enviar 'status=approved' o 'collection_status=approved'
-    const status = params.get('status') || params.get('collection_status');
-    const pagoExito = params.get('pago') === 'exito';
-
-    if ((status === 'approved' || pagoExito) && currentUser) {
-        try {
-            // 1. Actualizamos el rango en la base de datos
-            const { error } = await _db
-                .from('perfiles')
-                .update({ es_premium: true })
-                .ilike('nombre', currentUser);
-
-            if (error) throw error;
-
-            // 2. Limpiamos la URL para que no se active doble al recargar
-            window.history.replaceState(null, null, window.location.pathname);
-
-            // ¡Celebración de Bienvenida Premium!
-            if (typeof lanzarConfetiGold === 'function') lanzarConfetiGold();
-
-            // 3. Alerta Gold de Bienvenida al Club
-            await goldAlert({
-                title: "¡ACCESO DE ÉLITE ACTIVADO!",
-                text: "Tu pago ha sido verificado con éxito. A partir de ahora eres miembro PREMIUM de AiduMe. Disfruta de la experiencia sin esperas ni anuncios.",
-                icon: "👑",
-                confirmText: "EMPEZAR AHORA"
-            });
-
-            // 4. Actualizamos el perfil en el almacenamiento local
-            const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
-            if (perfilLocal) {
-                perfilLocal.premium = true;
-                localStorage.setItem('aidume_profile', JSON.stringify(perfilLocal));
-            }
-
-            // Recarga para aplicar los cambios en toda la app
-            location.reload();
-
-        } catch (err) {
-            console.error("Error al activar Premium automático:", err);
-        }
-    }
-}
 
 function activarNotificacionesEnVivo() {
     console.log("📡 Conectando con el radar de episodios Gold...");

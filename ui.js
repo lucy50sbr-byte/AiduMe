@@ -1,8 +1,9 @@
 let dataSaver = localStorage.getItem('data_saver') === 'true';
 
-// Reemplaza esto con tu "Public Key" de Mercado Pago (empieza con APP_USR-... o TEST-...)
+// Variables globales para Mercado Pago
 let mp = null;
 let cardFields = null;
+let usuarioEnPantalla = null; // Variable global para saber qué perfil estamos viendo
 
 function lanzarConfetiGold() {
     if (typeof confetti !== 'undefined') {
@@ -249,32 +250,27 @@ function mostrarCheckoutInterno() {
     panel.scrollIntoView({ behavior: 'smooth' });
 }
 
-function mostrarCheckoutTarjeta() {
-    // Intentamos inicializar MP si aún no está listo
-    if (typeof MercadoPago !== 'undefined' && !mp) {
-        mp = new MercadoPago('TEST-24e7dbce-65e5-4803-a7d1-76ba6014f07b');
-    }
-
-    document.getElementById('checkout-interno').style.display = 'none';
-    const panel = document.getElementById('checkout-tarjeta');
+async function mostrarCheckoutTarjeta() {
+    document.getElementById('checkout-interno').style.display = 'none'; // Oculta el checkout manual
+    const panel = document.getElementById('checkout-tarjeta'); // Muestra el panel de tarjeta
     if (panel) {
         panel.style.display = 'block';
-        
-        // Retardo mayor para asegurar que la animación terminó y el DOM es estable
-        setTimeout(() => {
-            panel.scrollIntoView({ behavior: 'smooth' });
+        panel.scrollIntoView({ behavior: 'smooth' });
 
+        // Inicializa Mercado Pago SDK si no está listo
+        if (typeof MercadoPago !== 'undefined' && !mp) {
+            // Credenciales de Producción
+            mp = new MercadoPago('APP_USR-de1dc75b-248c-461a-9691-7ec9b641e8a7', { locale: 'es-AR' });
+        }
+
+        // Solo crea los campos de tarjeta si mp está inicializado y los campos no han sido creados
         if (mp && !cardFields) {
-            // Inicializamos los campos personalizados para que se vean como tus inputs
-            const fields = mp.fields();
-            const style = { 
-                color: "#ffffff", 
-                fontSize: "16px", 
+            const fields = mp.fields; // Obtiene la instancia de los campos (sin paréntesis)
+            const style = {
+                color: "#ffffff",
+                fontSize: "16px",
                 fontFamily: "Segoe UI",
-                placeholder: { color: "#888888" },
-                // Agregamos padding interno al input real dentro del iframe
-                margin: "0",
-                padding: "12px" 
+                placeholder: { color: "#888888" } // Estilo para el placeholder
             };
 
             cardFields = {
@@ -283,63 +279,95 @@ function mostrarCheckoutTarjeta() {
                 securityCode: fields.create('securityCode', { placeholder: "CVV", style }).mount('securityCode')
             };
         }
-        }, 400);
     }
 }
 
 async function procesarPagoTarjeta() {
     const btn = document.getElementById('btn-pagar-tarjeta');
     const name = document.getElementById('card-name').value.trim();
+    const dni = document.getElementById('card-dni').value.trim();
 
     if (!name) return goldAlert({ title: "ERROR", text: "Ingresa el nombre del titular.", icon: "💳" });
-    if (!mp || !cardFields) return;
+    if (dni.length < 7) return goldAlert({ title: "ERROR", text: "Ingresa un DNI válido.", icon: "🆔" });
+    if (!mp || !cardFields) return goldAlert({ title: "ERROR", text: "El sistema de pago no está listo. Intenta de nuevo.", icon: "❌" });
 
     btn.disabled = true;
     btn.innerText = "TOKENIZANDO...";
 
     try {
-        // Generamos el token de la tarjeta usando tus campos
         const tokenResponse = await mp.fields.createCardToken({ cardholderName: name });
-        const token = tokenResponse.id;
+        
+        if (tokenResponse.errors) {
+            console.error("Errores de validación MP:", tokenResponse.errors);
+            throw new Error("Datos de tarjeta inválidos. Revisa el número, fecha y CVV.");
+        }
 
-        // Obtenemos el método de pago e emisor automáticamente
+        const token = tokenResponse.id;
         const bin = tokenResponse.first_six_digits;
+
+        if (!token) throw new Error("No se pudo generar el token de seguridad de la tarjeta.");
+
+        // Detectamos el método de pago (Visa, Mastercard, etc) usando el BIN
         const paymentMethods = await mp.getPaymentMethods({ bin });
+        if (!paymentMethods.results || paymentMethods.results.length === 0) {
+            throw new Error("No se pudo identificar el tipo de tarjeta (Visa/Mastercard). Revisa el número.");
+        }
         const payment_method_id = paymentMethods.results[0].id;
+        const issuer_id = paymentMethods.results[0].issuer?.id;
 
         btn.innerText = "PROCESANDO PAGO...";
 
         const { data: p } = await _db.from('perfiles').select('email').ilike('nombre', currentUser).single();
-        
-        // SOLUCIÓN AL ERROR DE EMAIL: Si el perfil no tiene email, usamos uno temporal
         const validEmail = (p?.email && p.email.includes('@')) ? p.email : `${currentUser.toLowerCase()}@aidume.com`;
 
         // Enviamos el token generado por MP a nuestra Edge Function
         const { data, error: funcError } = await _db.functions.invoke('verify-payment', {
-            body: { 
-                usuario: currentUser, 
+            body: {
+                usuario: currentUser,
                 metodo: 'mercadopago',
                 email: validEmail,
+                dni: dni,
                 token: token,
                 payment_method_id: payment_method_id,
+                issuer_id: issuer_id,
                 installments: 1
             }
         });
 
         if (funcError) {
-            // Intentamos extraer el mensaje de error detallado del cuerpo de la respuesta
-            let mensajeDetalle = "Error en el servidor de pagos.";
-            if (funcError.context && funcError.context.json) {
-                try {
-                    const bodyError = await funcError.context.json();
-                    mensajeDetalle = bodyError.details || bodyError.message || mensajeDetalle;
-                } catch (e) {
-                    mensajeDetalle = funcError.message;
+            console.error("Error en Edge Function:", funcError);
+
+            let errorMessage = funcError.message || "Error en el servidor de pagos.";
+            // Detectamos el estado 402 de forma flexible (número o string)
+            let isPending = (funcError.status == 402); 
+
+            try {
+                if (funcError.context && typeof funcError.context.json === 'function') {
+                    const errBody = await funcError.context.json();
+                    errorMessage = errBody.details || errBody.message || errorMessage;
+                    
+                    // Normalizamos el texto (quitamos acentos y pasamos a minúsculas) para una búsqueda segura
+                    const msgNormal = errorMessage.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    if (msgNormal.includes("revision") || msgNormal.includes("pendiente")) {
+                        isPending = true;
+                    }
                 }
-            } else {
-                mensajeDetalle = funcError.message;
+            } catch (e) {
+                console.warn("No se pudo leer el cuerpo del error.");
             }
-            throw new Error(mensajeDetalle);
+
+            if (isPending) {
+                return goldAlert({ 
+                    title: "PAGO EN PROCESO", 
+                    text: errorMessage, 
+                    icon: "⏳" 
+                });
+            }
+            throw new Error(errorMessage);
+        }
+
+        if (!data || data.message !== 'Pago aprobado.') {
+            throw new Error(data?.details || data?.message || "El pago no pudo ser verificado.");
         }
 
         lanzarConfetiGold();
@@ -354,7 +382,7 @@ async function procesarPagoTarjeta() {
         goldAlert({ title: "ERROR", text: err.message, icon: "❌" });
     } finally {
         btn.disabled = false;
-        btn.innerText = "PAGAR $4.00 USD";
+        btn.innerText = "PAGAR $400 ARS"; 
     }
 }
 
@@ -455,6 +483,9 @@ window.addEventListener('load', () => {
 // Agregamos el parámetro 'nombreAMostrar' que por defecto es el usuario actual
 async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
     if (!nombreAMostrar) return;
+
+    // --- NUEVO: Guardamos el nombre del usuario que estamos viendo ---
+    usuarioEnPantalla = nombreAMostrar;
 
     const esMismoUsuario = (currentUser === nombreAMostrar);
 
@@ -956,6 +987,21 @@ async function cambiarAvatar(id, url) {
 function hideDetails() { 
     const details = document.getElementById('details');
     const videoContainer = document.getElementById('video-player-container');
+
+    // --- MEJORA: RECARGA NUCLEAR SI EL VIDEO ESTÁ ACTIVO ---
+    // Si el usuario cierra la ficha mientras un video suena, recargamos la página 
+    // para asegurar que el audio se detenga por completo, igual que la barra inferior.
+    const iframeActivo = videoContainer ? videoContainer.querySelector('iframe') : null;
+    if (iframeActivo && videoContainer.style.display !== "none" && iframeActivo.src !== "" && !iframeActivo.src.includes("about:blank")) {
+        // Detectamos qué página está activa actualmente para regresar a ella tras recargar
+        const activePage = document.querySelector('.page.active-page');
+        if (activePage) {
+            window.location.hash = activePage.id;
+        }
+        window.location.reload();
+        return; // Salimos aquí, la recarga se encarga del resto
+    }
+
     const videoInfo = document.getElementById('video-ep-title');
 
     // 1. Ocultar el panel visual
@@ -996,6 +1042,30 @@ function hideDetails() {
     document.body.appendChild(tmp);
     tmp.focus();
     document.body.removeChild(tmp);
+}
+
+/**
+ * Inicia el proceso de transmisión a Smart TV
+ */
+async function transmitirTV() {
+    if (!urlTransmisionActual) return;
+
+    const confirmar = await goldAlert({
+        title: "TRANSMITIR A TV",
+        text: "Para ver en tu TV:\n1. Asegúrate de estar en la misma red WiFi.\n2. Presiona 'EMPEZAR' y busca el icono de Cast/Pantalla en el video o en tu navegador.",
+        icon: "📺",
+        showCancel: true,
+        confirmText: "EMPEZAR"
+    });
+
+    if (confirmar) {
+        // Abrimos la URL en una pestaña limpia para que el navegador 
+        // habilite las herramientas de Cast/AirPlay nativas.
+        const win = window.open(urlTransmisionActual, '_blank');
+        if (!win) {
+            goldAlert({ title: "BLOQUEADO", text: "Tu navegador bloqueó la ventana emergente. Permítela para transmitir.", icon: "🚫" });
+        }
+    }
 }
 
 async function verPerfilAjeno(nombreUsuario) {
@@ -1052,6 +1122,10 @@ function toggleEmojiPicker(inputId, btn) {
         });
     }
 
+    // Al abrir emojis, cerramos stickers si estuvieran abiertos
+    const stickerPicker = document.getElementById('global-sticker-picker');
+    if (stickerPicker) stickerPicker.style.display = 'none';
+
     if (picker.style.display === 'grid' && activeEmojiInputId === inputId) {
         picker.style.display = 'none';
     } else {
@@ -1092,6 +1166,10 @@ async function toggleStickerPicker(inputId, btn) {
             }
         });
     }
+
+    // Al abrir stickers, cerramos emojis si estuvieran abiertos
+    const emojiPicker = document.getElementById('global-emoji-picker');
+    if (emojiPicker) emojiPicker.style.display = 'none';
 
     if (picker.style.display === 'flex' && activeEmojiInputId === inputId) {
         picker.style.display = 'none';
