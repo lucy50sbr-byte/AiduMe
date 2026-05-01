@@ -20,9 +20,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
-    // Asignamos un monto por defecto de 0 si no viene en el body
-    const { usuario, metodo, email, monto = 0, referencia } = body;
+    const body: { usuario: string; metodo: string; email?: string; dni?: string; token?: string; payment_method_id?: string; installments?: number; issuer_id?: string; monto?: number; referencia?: string; } = await req.json();
+    const { usuario, metodo, email, dni, token, payment_method_id, installments, issuer_id, monto, referencia } = body;
 
     if (!usuario) {
       return new Response(JSON.stringify({ message: 'Faltan campos requeridos: usuario.' }), {
@@ -31,11 +30,22 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (!metodo) {
+        return new Response(JSON.stringify({ message: 'Falta el método de pago.' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error("Variables de entorno SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no encontradas.");
+    }
+
     // Crear un cliente de Supabase con la Service Role Key
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log(`[LOG] Iniciando proceso para: ${usuario} | Método: ${metodo}`);
 
@@ -44,21 +54,36 @@ Deno.serve(async (req) => {
       const accessToken = Deno.env.get('MP_ACCESS_TOKEN');
       if (!accessToken) throw new Error("MP_ACCESS_TOKEN no configurado.");
 
+      const missing = [];
+      if (!token) missing.push('Token');
+      if (!payment_method_id) missing.push('Método de Pago');
+      if (!installments) missing.push('Cuotas');
+
+      if (missing.length > 0) {
+        return new Response(JSON.stringify({ message: `Error interno: Faltan datos técnicos (${missing.join(', ')}).` }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
-          'X-Idempotency-Key': crypto.randomUUID()
+          'X-Idempotency-Key': crypto.randomUUID() // Importante para evitar pagos duplicados
         },
         body: JSON.stringify({
-          transaction_amount: 4000,
-          token: body.token,
+          transaction_amount: 400, // Monto FIJO de seguridad para pruebas
+          token: token,
           description: `Premium AiduMe - ${usuario}`,
-          installments: body.installments,
-          payment_method_id: body.payment_method_id,
-          issuer_id: body.issuer_id,
-          payer: { email: email || 'usuario@aidume.com', identification: body.identification }
+          installments: installments,
+          payment_method_id: payment_method_id,
+          issuer_id: issuer_id, // Opcional, pero bueno enviarlo si está disponible
+          payer: { 
+            email: email || `${usuario.toLowerCase()}@aidume.com`,
+            identification: dni ? { type: 'DNI', number: dni } : undefined
+          }
         })
       });
 
@@ -67,7 +92,6 @@ Deno.serve(async (req) => {
       // --- MANEJO DE ERRORES DE LA API DE MERCADO PAGO ---
       if (!mpRes.ok) {
         console.error('[MP-API-ERROR]', payment);
-        // Extraemos el mensaje de error de Mercado Pago o la causa específica
         const errorDetail = payment.message || (payment.cause && payment.cause[0]?.description) || 'Error en la solicitud a Mercado Pago';
         
         return new Response(JSON.stringify({ 
@@ -94,13 +118,26 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       } else if (payment.status === 'in_process' || payment.status === 'pending') {
-        return new Response(JSON.stringify({ message: 'Pago pendiente de acreditación.', details: payment.status_detail }), {
-          status: 200, // Respondemos 200 para que la UI no lo tome como error crítico
+        return new Response(JSON.stringify({ message: 'Pago pendiente.', details: 'Tu pago está en revisión. El Premium se activará automáticamente cuando se apruebe.' }), {
+          status: 402, // Error: Pago requerido (no finalizado)
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       } else if (payment.status === 'rejected') {
-        // Manejo específico para pagos rechazados
-        return new Response(JSON.stringify({ message: 'Pago rechazado.', details: payment.status_detail || 'El pago fue rechazado por Mercado Pago.' }), {
+        let userMessage = 'El pago fue rechazado por Mercado Pago.';
+        
+        // Personalizamos el mensaje según el detalle del rechazo
+        switch (payment.status_detail) {
+          case 'cc_rejected_other_reason':
+            userMessage = 'Tu tarjeta fue rechazada por el banco emisor. Intenta con otra tarjeta o contacta a tu banco.';
+            break;
+          case 'cc_rejected_insufficient_amount':
+            userMessage = 'Fondos insuficientes en tu tarjeta.';
+            break;
+          case 'cc_rejected_bad_filled_security_code':
+            userMessage = 'El código de seguridad de la tarjeta es incorrecto.';
+            break;
+        }
+        return new Response(JSON.stringify({ message: 'Pago rechazado.', details: userMessage }), {
           status: 400, // Indicamos un error del cliente (pago fallido)
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -109,30 +146,6 @@ Deno.serve(async (req) => {
         throw new Error(`Error de Mercado Pago: ${payment.status_detail || `El pago tiene un estado no manejado: ${payment.status || 'desconocido'}.`}`);
       }
     }
-
-    // --- CASO B: TRANSFERENCIA (MANUAL) O FALLBACK ---
-    const { data, error } = await supabaseAdmin
-      .from('pagos_revision')
-      .insert([{
-        usuario: usuario,
-        referencia: referencia || 'TRANSF_INTERNA',
-        monto: monto,
-        estado: 'pendiente'
-      }])
-      .select();
-
-    if (error) {
-      console.error('[ERROR DB]', error);
-      return new Response(JSON.stringify({ message: 'Error en base de datos.', details: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response(JSON.stringify({ message: 'Solicitud de pago enviada con éxito.', data }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
 
   } catch (error) {
     console.error('Error al procesar la solicitud en Edge Function:', error);
