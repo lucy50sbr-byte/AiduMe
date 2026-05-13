@@ -521,6 +521,7 @@ async function enviarMensajePrivado() {
 
     if (!error) {
         input.value = "";
+        reproducirSonidoChat();
     } else {
         console.error("🚨 Error Supabase:", error.code, error.message);
         const msgError = error.code === '42501' 
@@ -3155,6 +3156,7 @@ async function enviarMensajeChat() {
         console.error("Error al enviar:", error.message);
     } else {
         input.value = "";
+        reproducirSonidoChat();
         cargarMensajesChat();
     }
 }
