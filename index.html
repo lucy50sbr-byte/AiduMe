@@ -67,18 +67,18 @@
     <div id="home" class="page active-page">
         <div id="battle-section">
             <button onclick="irAnimeAzar()" class="btn-random-gold"><i>🎲</i> Ver anime aleatorio</button>
-            <div id="battle-status">⚔️ TORNEO SEMANAL</div>
+            <div id="battle-status">⚔️ TORNEO DIARIO</div>
+            <p style="color:var(--gold); font-size:0.6rem; letter-spacing:0.5px; margin-top:5px; font-weight:900;">💰 ¡APUESTA Y DUPLICA TU PREMIO!</p>
             <div id="battle-timer">¡VOTA POR TU FAVORITO!</div>
             <div class="battle-items">
                 <div class="battle-item" onclick="votarDuelo(0)">
-                    <img id="img1" src=""><p id="t1"></p><div id="v1" class="voto-label">0 votos</div>
+                    <img id="img1" src=""><p id="t1"></p><div id="v1" class="voto-label"></div>
                 </div>
                 <div class="vs-container"><img src="gif.vs.gif" alt="VS" class="vs-gif"></div>
                 <div class="battle-item" onclick="votarDuelo(1)">
-                    <img id="img2" src=""><p id="t2"></p><div id="v2" class="voto-label">0 votos</div>
+                    <img id="img2" src=""><p id="t2"></p><div id="v2" class="voto-label"></div>
                 </div>
             </div>
-            <div id="vote-counter">Votos disponibles: <span id="votos-restantes">3</span>/3</div>
         </div>
 
         <div class="search-container">
@@ -174,8 +174,8 @@
 
         <div class="profile-stats-row">
             <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
-            <div class="stat-item"><span class="stat-label">Tiempo</span><span class="stat-value" id="stat-horas">0h</span></div>
-            <div class="stat-item"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
+            <div class="stat-item"><span class="stat-label">Miembro desde</span><span class="stat-value" id="stat-horas">--</span></div>
+            <div class="stat-item clickable-stat" onclick="mostrarInfoFichas()"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
             <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
         </div>
 
@@ -324,6 +324,11 @@
                 <span>🖼️ COLECCIÓN DE STICKERS</span> <span class="arrow">▼</span>
             </button>
             <div id="tienda-stickers-grid" class="avatar-selector-grid" style="display:none; max-height: 250px; overflow-y: auto; padding: 10px 5px; margin: 10px 0;"></div>
+
+            <button onclick="toggleTiendaSeccion('tienda-backgrounds-grid')" class="btn-random-gold" style="width:100%; justify-content: space-between; margin-top: 10px; padding: 12px 15px;">
+                <span>🌄 FONDOS DE PERFIL</span> <span class="arrow">▼</span>
+            </button>
+            <div id="tienda-backgrounds-grid" class="avatar-selector-grid" style="display:none; max-height: 250px; overflow-y: auto; padding: 10px 5px; margin: 10px 0;"></div>
 
             <button onclick="cerrarTienda()" class="action-btn" style="margin-top: 20px; background: #222; color: white; border: 1px solid #444;">Cerrar</button>
         </div>

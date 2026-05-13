@@ -16,6 +16,7 @@ function toggleAuthMode() {
     const captchaCont = document.getElementById('captcha-container'); //
     const notifCont = document.getElementById('notif-req-container');
     const mainBtn = document.getElementById('main-auth-btn');
+    const switchLink = document.getElementById('auth-switch');
 
     if (isRegisterMode) {
         ageField.style.display = "block";
@@ -24,12 +25,14 @@ function toggleAuthMode() {
         notifCont.style.display = "block";
         generarCaptcha();
         mainBtn.innerText = "CREAR CUENTA";
+        switchLink.innerHTML = '¿Ya tienes cuenta? <span onclick="toggleAuthMode()" style="text-decoration: underline;">Inicia sesión</span>';
     } else {
         ageField.style.display = "none";
         emailField.style.display = "none"; // Se oculta en login
         captchaCont.style.display = "none"; // Se oculta en login
         notifCont.style.display = "none";
         mainBtn.innerText = "ENTRAR";
+        switchLink.innerHTML = '¿No tienes cuenta? <span onclick="toggleAuthMode()" style="text-decoration: underline;">Regístrate aquí</span>';
     }
 }
 

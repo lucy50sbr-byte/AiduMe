@@ -28,6 +28,12 @@ function lanzarConfetiGold() {
     }
 }
 
+function reproducirSonidoCompra() {
+    const audio = new Audio('sonidos/compra.mp3');
+    audio.volume = 0.5;
+    audio.play().catch(e => console.warn("El audio de compra requiere una interacción previa.", e));
+}
+
 const AVATARES_RANGOS = [
     { id: '1', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
     { id: '2', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka' },
@@ -69,23 +75,46 @@ const STICKER_PACKS_TIENDA = [
     { id: 'stk_pack_11', costo: 3000, nombre: 'Pack Dios', inicio: 101, fin: 110 }
 ];
 
-function abrirTienda() {
+// Definición de fondos de perfil comprables
+const BACKGROUNDS_TIENDA = [
+    { id: 'bg_0', costo: 0, img: null, nombre: 'Estilo Original' },
+    { id: 'bg_1', costo: 800, img: 'banderas/1.jpg', nombre: 'Fondo Especial 1' },
+    { id: 'bg_2', costo: 1200, img: 'banderas/2.jpg', nombre: 'Fondo Especial 2' },
+    { id: 'bg_3', costo: 1500, img: 'banderas/3.jpg', nombre: 'Fondo Especial 3' },
+    { id: 'bg_4', costo: 2000, img: 'banderas/4.jpg', nombre: 'Fondo Especial 4' },
+    { id: 'bg_5', costo: 2500, img: 'banderas/5.jpg', nombre: 'Fondo Especial 5' },
+    { id: 'bg_6', costo: 3000, img: 'banderas/6.jpg', nombre: 'Fondo Especial 6' },
+    { id: 'bg_7', costo: 4000, img: 'banderas/7.jpg', nombre: 'Fondo Especial 7' },
+    { id: 'bg_8', costo: 5000, img: 'banderas/8.webp', nombre: 'Fondo Especial 8' }
+];
+
+async function abrirTienda() {
     const modal = document.getElementById('modal-tienda');
     const grid = document.getElementById('tienda-avatares-grid');
-    if (!modal || !grid) return;
+    if (!modal || !grid || !currentUser) return;
+
+    // Consultamos datos frescos para saber qué ha comprado el usuario
+    const { data: perfil } = await _db.from('perfiles').select('*').eq('nombre', currentUser).single();
+    if (!perfil) return;
+
+    const avComprados = perfil.avatares_comprados || [];
+    const temasComprados = perfil.temas_comprados || [];
+    const stkComprados = perfil.stickers_comprados || [];
+    const bgsComprados = perfil.backgrounds_comprados || [];
 
     toggleTiendaSeccion(null); // Asegura que todo inicie cerrado
 
     grid.innerHTML = "";
     AVATARES_TIENDA.forEach(av => {
+        const yaComprado = avComprados.includes(av.id);
         const div = document.createElement('div');
         div.className = "avatar-buy-card";
         div.innerHTML = `
             <img src="${av.img}" style="width:50px; border-radius:50%; border: 1px solid var(--gold); background:#111;">
             <div style="font-size:0.6rem; color:#fff; margin:5px 0;">${av.nombre}</div>
-            <button onclick="comprarAvatar('${av.id}', ${av.costo}, '${av.img}')" 
+            <button onclick="${yaComprado ? `cambiarAvatar('${av.id}', '${av.img}')` : `comprarAvatar('${av.id}', ${av.costo}, '${av.img}')`}" 
                     style="background:var(--gold); border:none; border-radius:5px; font-size:0.6rem; padding:4px 8px; cursor:pointer; font-weight:bold;">
-                💰 ${av.costo}
+                ${yaComprado ? 'USAR' : `💰 ${av.costo}`}
             </button>
         `;
         grid.appendChild(div);
@@ -96,13 +125,16 @@ function abrirTienda() {
     if (gridTemas) {
         gridTemas.innerHTML = "";
         TEMAS_CHAT.forEach(t => {
+            const yaComprado = temasComprados.includes(t.id);
             const div = document.createElement('div');
             div.className = "chat-skin-card";
             div.innerHTML = `
                 <div style="width:20px; height:20px; background:${t.color}; border-radius:50%; margin:0 auto 5px; box-shadow: 0 0 10px ${t.color};"></div>
                 <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${t.nombre}</div>
-                <button onclick="comprarTema('${t.id}', ${t.costo})" 
-                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">💰 ${t.costo}</button>
+                <button onclick="comprarTema('${t.id}', ${yaComprado ? 0 : t.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                    ${yaComprado ? 'USAR' : `💰 ${t.costo}`}
+                </button>
             `;
             gridTemas.appendChild(div);
         });
@@ -113,14 +145,39 @@ function abrirTienda() {
     if (gridStickers) {
         gridStickers.innerHTML = "";
         STICKER_PACKS_TIENDA.forEach(p => {
+            const yaComprado = stkComprados.includes(p.id);
             const div = document.createElement('div');
             div.className = "chat-skin-card";
             div.innerHTML = `
                 <img src="stickers/${p.inicio}.gif" style="width:30px; height:30px; object-fit:contain; margin-bottom:5px;">
                 <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${p.nombre}</div>
-                <button onclick="comprarStickerPack('${p.id}', ${p.costo})" 
-                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">💰 ${p.costo}</button>`;
+                <button onclick="${yaComprado ? "goldAlert({title:'LISTO', text:'Pack activo en el chat', icon:'✨'})" : `comprarStickerPack('${p.id}', ${p.costo})`}" 
+                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                    ${yaComprado ? 'USAR' : `💰 ${p.costo}`}
+                </button>`;
             gridStickers.appendChild(div);
+        });
+    }
+
+    // Cargar Fondos en la Tienda
+    const gridBgs = document.getElementById('tienda-backgrounds-grid');
+    if (gridBgs) {
+        gridBgs.innerHTML = "";
+        BACKGROUNDS_TIENDA.forEach(bg => {
+            const yaComprado = bgsComprados.includes(bg.id) || bg.costo === 0;
+            const div = document.createElement('div');
+            div.className = "avatar-buy-card";
+            // Previsualización para el Estilo Original
+            const preview = bg.img ? bg.img : 'stickers/visto2.png'; 
+            div.innerHTML = `
+                <img src="${preview}" style="width:100%; height:40px; border-radius:8px; object-fit:cover; border: 1px solid var(--gold); background:#111;">
+                <div style="font-size:0.55rem; color:#fff; margin:5px 0;">${bg.nombre}</div>
+                <button onclick="comprarBackground('${bg.id}', ${yaComprado ? 0 : bg.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                    ${yaComprado ? 'USAR' : `💰 ${bg.costo}`}
+                </button>
+            `;
+            gridBgs.appendChild(div);
         });
     }
 
@@ -128,7 +185,7 @@ function abrirTienda() {
 }
 
 function toggleTiendaSeccion(id) {
-    const secciones = ['tienda-avatares-grid', 'tienda-temas-grid', 'tienda-stickers-grid'];
+    const secciones = ['tienda-avatares-grid', 'tienda-temas-grid', 'tienda-stickers-grid', 'tienda-backgrounds-grid'];
     secciones.forEach(sId => {
         const el = document.getElementById(sId);
         if (!el) return;
@@ -175,6 +232,7 @@ async function comprarAvatar(id, costo, imgUrl) {
         }).eq('nombre', currentUser);
 
         lanzarConfetiGold();
+        reproducirSonidoCompra();
         goldAlert({ title: "¡COMPRA EXITOSA!", text: "Tu nuevo avatar ha sido equipado.", icon: "✨" });
         cerrarTienda();
         actualizarPerfilDesdeSQL();
@@ -209,6 +267,7 @@ async function comprarTema(id, costo) {
         }).eq('nombre', currentUser);
         
         lanzarConfetiGold();
+        reproducirSonidoCompra();
         goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo skin de chat activado.", icon: "🔥" });
         actualizarPerfilDesdeSQL();
         if(typeof aplicarTemaChatLocal === 'function') aplicarTemaChatLocal();
@@ -238,7 +297,41 @@ async function comprarStickerPack(id, costo) {
         }).eq('nombre', currentUser);
         
         lanzarConfetiGold();
+        reproducirSonidoCompra();
         goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo paquete de stickers listo para usar.", icon: "✨" });
+        actualizarPerfilDesdeSQL();
+        cerrarTienda();
+    }
+}
+
+async function comprarBackground(id, costo) {
+    const { data: perfil } = await _db.from('perfiles').select('aidufichas, backgrounds_comprados').eq('nombre', currentUser).single();
+    
+    if (perfil.backgrounds_comprados?.includes(id)) {
+        // Si ya lo tiene, simplemente lo equipamos
+        await _db.from('perfiles').update({ background_id: id }).eq('nombre', currentUser);
+        goldAlert({ title: "FONDO EQUIPADO", text: "Has cambiado el fondo de tu perfil.", icon: "✨" });
+        actualizarPerfilDesdeSQL();
+        return cerrarTienda();
+    }
+
+    if (perfil.aidufichas < costo) {
+        return goldAlert({ title: "FICHAS INSUFICIENTES", text: `Necesitas ${costo} fichas para este fondo.`, icon: "📉" });
+    }
+
+    const confirmar = await goldAlert({ title: "COMPRAR FONDO", text: `¿Quieres desbloquear este fondo por ${costo} fichas?`, icon: "✨", showCancel: true });
+
+    if (confirmar) {
+        const nuevaLista = [...(perfil.backgrounds_comprados || []), id];
+        await _db.from('perfiles').update({ 
+            aidufichas: perfil.aidufichas - costo, 
+            backgrounds_comprados: nuevaLista,
+            background_id: id 
+        }).eq('nombre', currentUser);
+        
+        lanzarConfetiGold();
+        reproducirSonidoCompra();
+        goldAlert({ title: "¡DESBLOQUEADO!", text: "Nuevo fondo de perfil activado.", icon: "🔥" });
         actualizarPerfilDesdeSQL();
         cerrarTienda();
     }
@@ -371,6 +464,7 @@ async function procesarPagoTarjeta() {
         }
 
         lanzarConfetiGold();
+        reproducirSonidoCompra();
         const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
         if (perfilLocal) { perfilLocal.premium = true; localStorage.setItem('aidume_profile', JSON.stringify(perfilLocal)); }
 
@@ -521,20 +615,21 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
     try {
         // --- 1. FETCH DE DATOS (Perfil + Estadísticas en paralelo) ---
         // Traemos el perfil y los conteos de una vez para evitar esperas en cascada
-        const [perfilRes, comentariosRes, reportesRes] = await Promise.all([
+        const [perfilRes, comentariosRes, reportesRes, vistosRes] = await Promise.all([
             _db.from('perfiles').select('*').eq('nombre', nombreAMostrar).single(),
             _db.from('comentarios').select('id', { count: 'exact', head: true }).eq('usuario', nombreAMostrar),
-            _db.from('reportes').select('id', { count: 'exact', head: true }).eq('usuario_reporta', nombreAMostrar)
+            _db.from('reportes').select('id', { count: 'exact', head: true }).eq('usuario_reporta', nombreAMostrar),
+            _db.from('episodios_vistos').select('id', { count: 'exact', head: true }).eq('usuario_nombre', nombreAMostrar)
         ]);
 
         if (perfilRes.error) throw perfilRes.error;
         const perfil = perfilRes.data;
 
         // --- 2. CÁLCULOS ---
-        const totalVistos = (perfil.xp || 0) + ((perfil.nivel - 1) * 3);
-        const horasTotales = Math.floor((totalVistos * 24) / 60);
+        const totalVistos = vistosRes.count || 0;
         
         const fechaRegistro = new Date(perfil.fecha_registro);
+        const fechaFormateada = fechaRegistro.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
         const aniosAntiguedad = (new Date() - fechaRegistro) / (1000 * 60 * 60 * 24 * 365.25);
 
         // --- 3. ACTUALIZACIÓN DE TEXTOS Y UI ---
@@ -547,17 +642,18 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         }
 
         if (elementos.elVistos) elementos.elVistos.innerText = totalVistos;
-        if (elementos.elHoras) elementos.elHoras.innerText = `${horasTotales}h`;
+        if (elementos.elHoras) elementos.elHoras.innerText = fechaFormateada;
         if (elementos.elFichas) elementos.elFichas.innerText = perfil.aidufichas || 0;
         if (elementos.elEdad) elementos.elEdad.innerText = perfil.edad || "--";
 
         // --- ACTUALIZACIÓN VISUAL DE LA BARRA DE XP ---
+        const xpRequerida = (perfil.nivel || 1) * 3;
         if (elementos.elXPBar) {
-            const porcentaje = ((perfil.xp || 0) / 3) * 100;
+            const porcentaje = ((perfil.xp || 0) / xpRequerida) * 100;
             elementos.elXPBar.style.width = `${porcentaje}%`;
         }
         if (elementos.elXPText) {
-            elementos.elXPText.innerText = `${perfil.xp || 0}/3 XP`;
+            elementos.elXPText.innerText = `${perfil.xp || 0}/${xpRequerida} XP`;
         }
 
         if (elementos.elBio) {
@@ -622,6 +718,24 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         // El selector solo aparece para el dueño
         if (esMismoUsuario) {
             renderAvatarSelector(perfil, avatarActualId);
+        }
+
+        // --- NUEVO: APLICAR FONDO DE PERFIL ---
+        const profileCard = document.querySelector('.profile-header-card');
+        const profileBanner = document.querySelector('.profile-banner');
+        if (profileCard) {
+            const bgId = perfil.background_id;
+            const bgFound = BACKGROUNDS_TIENDA.find(b => b.id === bgId);
+            if (bgFound && bgFound.img) {
+                profileCard.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.8)), url('${bgFound.img}')`;
+                profileCard.style.backgroundSize = 'cover';
+                profileCard.style.backgroundPosition = 'center';
+                if (profileBanner) profileBanner.style.background = 'none'; // Quita el diseño gold de arriba
+            } else {
+                profileCard.style.backgroundImage = 'none';
+                profileCard.style.background = 'linear-gradient(145deg, #1a1a1a, #0a0a0a)';
+                if (profileBanner) profileBanner.style.background = 'linear-gradient(to right, #b8860b, #ffd700, #b8860b)'; // Lo restaura si no hay fondo
+            }
         }
 
         // --- 5. LÓGICA DE CONDECORACIONES ---
@@ -1096,6 +1210,21 @@ async function verPerfilAjeno(nombreUsuario) {
 
     // 6. Llamamos a la carga con el nombre del otro usuario
     actualizarPerfilDesdeSQL(nombreUsuario);
+}
+
+/**
+ * Muestra una nota informativa sobre cómo ganar Aidufichas
+ */
+function mostrarInfoFichas() {
+    goldAlert({
+        title: "SISTEMA DE AIDUFICHAS",
+        text: "Puedes ganar Aidufichas de las siguientes formas:\n\n" +
+              "📺 VIENDO ANIME: Ganas 2 fichas por cada episodio nuevo que mires.\n\n" +
+              "⏳ TIEMPO ONLINE: Ganas 10 fichas por cada hora que permanezcas activo en la app.\n\n" +
+              "🎲 TORNEOS: Puedes apostar tus fichas en el Torneo Diario para duplicarlas.",
+        icon: "💰",
+        confirmText: "¡ENTENDIDO!"
+    });
 }
 
 // Único disparador al cargar la web

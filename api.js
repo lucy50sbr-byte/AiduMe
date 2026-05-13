@@ -13,6 +13,25 @@ let urlTransmisionActual = null; // URL para enviar a la TV
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
 
+// Global variable to store the current day's date string (YYYY-MM-DD)
+let currentDayString = '';
+
+// Function to get the current day in YYYY-MM-DD format
+function getTodayString() {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    return `${year}${month}${day}`; // Devuelve YYYYMMDD (ej: 20260507) compatible con INTEGER
+}
+
+// Function to get yesterday's date in YYYY-MM-DD format
+function getYesterdayString() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}${(d.getMonth() + 1).toString().padStart(2, '0')}${d.getDate().toString().padStart(2, '0')}`;
+}
+
 function parsearMensajeParaStickers(texto) {
     if (!texto) return "";
     const regex = /\[STK:([^\]]+)\]/g;
@@ -20,6 +39,7 @@ function parsearMensajeParaStickers(texto) {
 }
 
 async function initApp() {
+    currentDayString = getTodayString(); // Initialize current day string
     await cargarDuelo();
     cargarHome();
     cargarUltimosEpisodios();
@@ -49,6 +69,10 @@ async function initApp() {
             actualizarPerfilDesdeSQL(usuarioEnPantalla || currentUser);
         }
     }, 300000); // Cada 5 minutos
+
+    // NEW: Check for daily tournament winner and distribute rewards
+    verificarGanadorDiario();
+    setInterval(verificarGanadorDiario, 3600000); // Check every hour to catch up if the app wasn't open at midnight
 
     // Auto-abrir anime desde notificación
     const params = new URLSearchParams(window.location.search);
@@ -173,7 +197,7 @@ async function showDetails(a) {
     for (let i = 1; i <= cantidad; i++) {
         const isChecked = listaVistos.includes(i) ? 'checked' : '';
         html += `
-            <div class="episode-row">
+            <div class="episode-row" data-ep="${i}">
                 <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                     <span class="play-icon">▶</span>
                     <div>
@@ -354,20 +378,27 @@ function escucharSolicitudesAmistad() {
     if (!currentUser) return;
 
     _db.channel('amistades-radar')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'amistades' }, payload => {
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'amistades' }, async payload => {
         const s = payload.new;
         // Comprobamos si la solicitud es para mí
         if (s.usuario_recibe.trim().toLowerCase() === currentUser.trim().toLowerCase() && s.estado === 'pendiente') {
             reproducirSonidoAnime();
-            goldAlert({
-                title: "NUEVA SOLICITUD",
-                text: `@${s.usuario_envia} quiere ser tu amigo.`,
-                icon: "👥"
-            });
             // Si el usuario está viendo su propio perfil, refrescamos la lista automáticamente
             const seccionAmigos = document.getElementById('seccion-amigos-perfil');
             if (seccionAmigos && seccionAmigos.style.display !== 'none') {
                 actualizarPerfilDesdeSQL();
+            }
+
+            const respuesta = await goldAlert({
+                title: "NUEVA SOLICITUD",
+                text: `@${s.usuario_envia} quiere ser tu amigo.`,
+                icon: "👥",
+                showCancel: true,
+                confirmText: "ACEPTAR"
+            });
+
+            if (respuesta) {
+                gestionarSolicitud(s.id, 'aceptar', s.usuario_envia);
             }
         }
     }).subscribe();
@@ -467,8 +498,8 @@ function renderizarMensajesPrivados(mensajes) {
         const textoLimpio = parsearMensajeParaStickers(m.mensaje);
         
         // Icono de visto solo para mis mensajes (siempre se muestra)
-        const checkIcon = esMio 
-            ? `<span class="seen-icon ${m.leido ? 'visto' : ''}">${m.leido ? '✔️✔️' : '✔️'}</span>` 
+        const checkIcon = esMio
+            ? `<img src="stickers/${m.leido ? 'visto2.png' : 'visto.png'}" class="chat-seen-icon ${m.leido ? 'seen' : 'unseen'}">`
             : '';
 
         return `
@@ -544,7 +575,7 @@ function escucharChatPrivado() {
                 if (document.getElementById('modal-chat-privado').style.display === 'flex') {
                     const cont = document.getElementById('privado-mensajes');
                     const esMio = emisor === uActual;
-                    const checkIcon = esMio ? `<span class="seen-icon ${m.leido ? 'visto' : ''}">${m.leido ? '✔️✔️' : '✔️'}</span>` : '';
+                    const checkIcon = esMio ? `<img src="stickers/${m.leido ? 'visto2.png' : 'visto.png'}" class="chat-seen-icon ${m.leido ? 'seen' : 'unseen'}">` : '';
                     cont.innerHTML += `<div class="priv-msg-row ${esMio ? 'priv-msg-me' : 'priv-msg-them'}">${parsearMensajeParaStickers(m.mensaje)} ${checkIcon}</div>`;
                     cont.scrollTop = cont.scrollHeight;
                 }
@@ -709,11 +740,7 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
                         // Calculamos el tiempo relativo real
                         const diffMins = Math.floor(diferenciaMs / 60000);
                         if (diffMins < 60) etiquetaTiempo = `Hace ${diffMins} min`;
-                        else if (diffMins < 1440) {
-                            // Si fue hoy, mostramos la hora exacta en formato local (24hs)
-                            const horaLocal = fechaObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            etiquetaTiempo = `Hoy ${horaLocal}`;
-                        }
+                        else if (diffMins < 1440) etiquetaTiempo = `Hace ${Math.floor(diffMins / 60)}h`;
                         else etiquetaTiempo = `Hace ${Math.floor(diffMins / 1440)} días`;
                     }
                 }
@@ -782,8 +809,9 @@ async function ganarRecompensaGold({ xp = 0, fichas = 0, silencioso = true }) {
         let nuevoNivel = perfil.nivel || 1;
         let nuevasFichas = (perfil.aidufichas || 0) + fichas;
 
-        while (nuevaXP >= 3) {
-            nuevaXP -= 3;
+        // Multiplicador de XP: Ahora la XP necesaria escala con el nivel (Nivel actual * 3)
+        while (nuevaXP >= (nuevoNivel * 3)) {
+            nuevaXP -= (nuevoNivel * 3);
             nuevoNivel++;
             if (!silencioso) {
                 // Si la función existe, lanzamos la fiesta
@@ -808,8 +836,8 @@ function iniciarContadorOnline() {
     // Cada 1 hora (3600000 ms) otorga 1 XP y 10 Aidufichas
     setInterval(() => {
         if (currentUser) {
-            ganarRecompensaGold({ xp: 1, fichas: 10, silencioso: false });
-            console.log("💎 Recompensa por fidelidad otorgada: 1XP + 10 Aidufichas");
+            ganarRecompensaGold({ xp: 0, fichas: 10, silencioso: true });
+            console.log("💎 Recompensa por fidelidad otorgada: 10 Aidufichas");
         }
     }, 3600000);
 }
@@ -830,7 +858,24 @@ async function toggleEpisodioVisto(animeId, epNum, checkbox) {
             if (error) throw error;
 
             console.log(`✅ Guardado en DB: Anime ${animeId}, Ep ${epNum}`);
-            ganarRecompensaGold({ xp: 1, fichas: 2 }); 
+            
+            // --- SISTEMA DE RECOMPENSA ÚNICA ---
+            // Intentamos insertar en una tabla de control. Si ya existe, Supabase dará error y no daremos monedas.
+            // Nota: Debes tener una tabla 'recompensas_otorgadas' con UNIQUE(usuario, anime_id, episodio)
+            const { error: errorUnico } = await _db.from('recompensas_otorgadas').insert([{
+                usuario: currentUser.trim(),
+                anime_id: animeId,
+                episodio: epNum
+            }]);
+
+            if (!errorUnico) {
+                // Si NO hubo error, significa que es la primera vez que lo ve
+                await ganarRecompensaGold({ xp: 1, fichas: 2, silencioso: false });
+                console.log("💰 XP y Fichas otorgadas correctamente.");
+            } else {
+                // Si hubo error (404 o duplicate), lo ignoramos silenciosamente
+                console.log("ℹ️ Este episodio ya dio XP anteriormente.");
+            }
         } else {
             const { error } = await _db.from('episodios_vistos').delete()
                 .eq('usuario_nombre', currentUser)
@@ -840,6 +885,12 @@ async function toggleEpisodioVisto(animeId, epNum, checkbox) {
 
             console.log(`❌ Eliminado de DB: Anime ${animeId}, Ep ${epNum}`);
         }
+
+        // FORZAMOS EL REFRESCO DE LA UI: Esto asegura que el contador y la barra se muevan
+        if (typeof actualizarPerfilDesdeSQL === 'function') {
+            actualizarPerfilDesdeSQL(usuarioEnPantalla || currentUser);
+        }
+
     } catch (err) {
         console.error("🚨 Error en toggleEpisodioVisto:", err);
         goldAlert({ title: "ERROR", text: "No se pudo sincronizar el progreso.", icon: "❌" });
@@ -1012,40 +1063,26 @@ async function cargarDuelo() {
 }
 
 async function actualizarMarcadorGlobal() {
-    const semanaActual = getWeekNumber(new Date());
-    let votosTotales = [0, 0]; // Para guardar los resultados y comparar
+    const todayString = getTodayString(); // Use daily string
+    const profileData = JSON.parse(localStorage.getItem('aidume_profile'));
+    const isAdmin = profileData && (profileData.rol === 'dueño' || profileData.rol === 'admin');
 
     for (let i = 0; i < 2; i++) {
         const { count, error } = await _db
             .from('torneo_votos')
             .select('*', { count: 'exact', head: true })
             .eq('anime_id', duelAnimes[i].mal_id)
-            .eq('semana_voto', semanaActual);
+            .eq('dia_voto', todayString); // Use dia_voto
         
         if (!error) {
-            // 1. Cálculo de votos con la base fija
-            const baseFija = (duelAnimes[i].mal_id % 100) + 400;
-            votosTotales[i] = baseFija + (count || 0);
+            const votosReal = count || 0;
             
-            // 2. Actualizar el texto en el HTML
+            // 2. Actualizar el texto en el HTML (solo a admin/dueño)
             const labelVotos = document.getElementById(`v${i+1}`);
-            if (labelVotos) labelVotos.innerText = votosTotales[i] + " votos";
-        }
-    }
-
-    // --- NUEVO: LÓGICA DE BRILLO DORADO (WINNER GLOW) ---
-    const items = document.querySelectorAll('.battle-item');
-    
-    if (items.length >= 2) {
-        // Limpiamos la clase de ambos para re-evaluar el ganador
-        items[0].classList.remove('winner-glow');
-        items[1].classList.remove('winner-glow');
-
-        // Aplicamos el brillo infinito al que tenga más votos
-        if (votosTotales[0] > votosTotales[1]) {
-            items[0].classList.add('winner-glow');
-        } else if (votosTotales[1] > votosTotales[0]) {
-            items[1].classList.add('winner-glow');
+            if (labelVotos) {
+                if (isAdmin) labelVotos.innerText = votosReal + " votos";
+                else labelVotos.innerText = "";
+            }
         }
     }
 }
@@ -1059,7 +1096,7 @@ async function votarDuelo(index) {
         });
     }
 
-    const semanaActual = getWeekNumber(new Date());
+    const todayString = getTodayString(); // Use daily string
 
     try {
         // 1. Verificar límites de votos y obtener saldo actual de fichas
@@ -1067,17 +1104,17 @@ async function votarDuelo(index) {
             _db.from('torneo_votos')
                 .select('*', { count: 'exact', head: true })
                 .eq('usuario_nombre', currentUser)
-                .eq('semana_voto', semanaActual),
+                .eq('dia_voto', todayString), // Use dia_voto
             _db.from('perfiles')
                 .select('aidufichas')
                 .ilike('nombre', currentUser)
                 .single()
         ]);
 
-        if (resVotos.count >= 3) {
+        if (resVotos.count >= 1) { // Changed from 3 to 1
             return goldAlert({
                 title: "LÍMITE ALCANZADO",
-                text: "¡Ya usaste tus 3 votos semanales!",
+                text: "¡Ya votaste en el torneo de hoy!",
                 icon: "🚫"
             });
         }
@@ -1108,8 +1145,8 @@ async function votarDuelo(index) {
             .insert([{
                 usuario_nombre: currentUser,
                 anime_id: duelAnimes[index].mal_id,
-                anime_titulo: duelAnimes[index].title,
-                semana_voto: semanaActual,
+                anime_titulo: duelAnimes[index].title, // Keep for notifications
+                dia_voto: todayString, // Use dia_voto
                 apuesta: apuestaInt
             }]);
 
@@ -1122,7 +1159,7 @@ async function votarDuelo(index) {
 
         goldAlert({
             title: "APUESTA REALIZADA",
-            text: `Has apostado ${apuestaInt} fichas por ${duelAnimes[index].title}. ¡Si gana al final de la semana, duplicarás tu premio!`,
+            text: `Has apostado ${apuestaInt} fichas por ${duelAnimes[index].title}. ¡Si gana al final del día, duplicarás tu premio!`, // Updated message
             icon: "🔥"
         });
 
@@ -1143,22 +1180,18 @@ async function votarDuelo(index) {
 
 async function actualizarVotosUI() {
     if (!currentUser) return;
-    const semanaActual = getWeekNumber(new Date());
+    const todayString = getTodayString(); // Use daily string
 
     const { count } = await _db
         .from('torneo_votos')
         .select('*', { count: 'exact', head: true })
         .eq('usuario_nombre', currentUser)
-        .eq('semana_voto', semanaActual);
+        .eq('dia_voto', todayString); // Use dia_voto
 
-    const restantes = 3 - (count || 0);
-    const counter = document.getElementById('votos-restantes');
-    if (counter) counter.innerText = restantes;
-    
-    document.querySelectorAll('.battle-item').forEach(el => {
-        el.style.opacity = restantes === 0 ? "0.4" : "1";
-        el.style.pointerEvents = restantes === 0 ? "none" : "auto";
-    });
+    // Ya no mostramos el contador de votos restantes ni deshabilitamos los botones.
+    // La lógica de un voto por día se maneja en votarDuelo().
+    // Los botones siempre estarán activos visualmente.
+    document.querySelectorAll('.battle-item').forEach(el => el.style.pointerEvents = "auto");
 }
 
 /**
@@ -1206,25 +1239,130 @@ async function verificarRachaDias() {
  */
 function obtenerHtmlRacha(dias) {
     if (!dias || dias < 1) return "";
-    let texto = "Aspirante";
-    let clase = "racha-aspirante";
+    let imgNum = 1;
+    if (dias >= 3 && dias < 7) imgNum = 2;
+    else if (dias >= 7 && dias < 15) imgNum = 3;
+    else if (dias >= 15 && dias < 30) imgNum = 4;
+    else if (dias >= 30) imgNum = 5;
 
-    if (dias >= 3 && dias < 7) { texto = "Maldad"; clase = "racha-maldad"; }
-    else if (dias >= 7 && dias < 15) { texto = "Devil"; clase = "racha-devil"; }
-    else if (dias >= 15 && dias < 30) { texto = "Demon"; clase = "racha-demon"; }
-    else if (dias >= 30) { texto = "Overlord"; clase = "racha-overlord"; }
-    
-    return `<span class="racha-item ${clase}" title="Racha de ${dias} días"><span class="racha-tag-text">${texto} ${dias}</span></span>`;
+    return `<span class="racha-item" title="Ver racha" 
+                  onclick="event.stopPropagation(); goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' });"
+                  style="cursor:pointer;">
+                <img src="insignias/racha${imgNum}.gif" style="height:28px; vertical-align:middle;">
+            </span>`;
 }
 
 /**
  * Carga y muestra el ranking semanal de animes (Lunes-Sábado) 
  * y revela al ganador los Domingos (Estilo UFA).
  */
-async function cargarRankingSemanal() {
+async function verificarGanadorDiario() {
+    const yesterdayString = getYesterdayString();
+    
+    // Check if results for yesterday have already been processed
+    const { data: processedResult, error: resultError } = await _db
+        .from('torneo_resultados_diarios')
+        .select('*')
+        .eq('dia', yesterdayString)
+        .single();
+
+    if (processedResult && processedResult.processed) {
+        // console.log(`Resultados para ${yesterdayString} ya procesados.`);
+        return; // Already processed, do nothing
+    }
+
+    // If not processed, calculate winner and distribute rewards
+    try {
+        const { data: votes, error: votesError } = await _db
+            .from('torneo_votos')
+            .select('anime_id, anime_titulo, usuario_nombre, apuesta')
+            .eq('dia_voto', yesterdayString);
+
+        if (votesError) throw votesError;
+
+        if (!votes || votes.length === 0) {
+            // No votes for yesterday, mark as processed without a winner
+            await _db.from('torneo_resultados_diarios').upsert({
+                dia: yesterdayString,
+                ganador_anime_id: null,
+                ganador_anime_titulo: null,
+                processed: true
+            }, { onConflict: 'dia' });
+            // console.log(`No votes for ${yesterdayString}. Marked as processed.`);
+            return;
+        }
+
+        // Calculate total votes for each anime
+        const animeVotes = {};
+        votes.forEach(vote => {
+            if (!animeVotes[vote.anime_id]) {
+                animeVotes[vote.anime_id] = { count: 0, title: vote.anime_titulo };
+            }
+            animeVotes[vote.anime_id].count++;
+        });
+
+        let winningAnimeId = null;
+        let winningAnimeTitle = null;
+        let maxVotes = -1;
+
+        for (const id in animeVotes) {
+            if (animeVotes[id].count > maxVotes) {
+                maxVotes = animeVotes[id].count;
+                winningAnimeId = parseInt(id);
+                winningAnimeTitle = animeVotes[id].title;
+            }
+        }
+
+        // Distribute rewards and send notifications
+        const processedUsers = new Set(); // To avoid duplicate notifications for users who voted multiple times (though daily limit is 1 now)
+        for (const vote of votes) {
+            if (processedUsers.has(vote.usuario_nombre)) continue; // Skip if already processed for this user
+
+            if (vote.anime_id === winningAnimeId) {
+                // Winner! Double the bet
+                const reward = vote.apuesta * 2;
+                if (reward > 0) {
+                    await ganarRecompensaGold({ fichas: reward, silencioso: true });
+                    lanzarNotificacionSistema(
+                        "🏆 ¡GANASTE EL TORNEO DIARIO!",
+                        `¡Felicidades! Tu apuesta por "${vote.anime_titulo}" ha ganado. Has recibido ${reward} Aidufichas.`,
+                        'logo-grande.png' // Use a generic app logo
+                    );
+                } else {
+                    lanzarNotificacionSistema(
+                        "🏆 ¡GANASTE EL TORNEO DIARIO!",
+                        `¡Felicidades! Tu anime "${vote.anime_titulo}" ha ganado el torneo diario.`,
+                        'logo-grande.png'
+                    );
+                }
+            } else {
+                // Loser
+                lanzarNotificacionSistema(
+                    "😔 TORNEO DIARIO",
+                    `Tu apuesta por "${vote.anime_titulo}" no ha ganado el torneo de ayer. ¡Más suerte la próxima vez!`,
+                    'logo-grande.png'
+                );
+            }
+            processedUsers.add(vote.usuario_nombre);
+        }
+
+        // Mark as processed in the results table
+        await _db.from('torneo_resultados_diarios').upsert({
+            dia: yesterdayString,
+            ganador_anime_id: winningAnimeId,
+            ganador_anime_titulo: winningAnimeTitle,
+            processed: true
+        }, { onConflict: 'dia' });
+
+        console.log(`Resultados del torneo diario para ${yesterdayString} procesados. Ganador: ${winningAnimeTitle}`);
+
+    } catch (err) {
+        console.error(`Error al procesar el ganador diario para ${yesterdayString}:`, err);
+        // Optionally, log this error to a monitoring system
+    }
 }
 
-// Función necesaria para calcular la semana (ISO Week)
+// Remove the old getWeekNumber and verificarGanadorSemanal as they are no longer needed for tournament logic
 function getWeekNumber(d) {
     d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
     d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
@@ -1233,11 +1371,11 @@ function getWeekNumber(d) {
 }
 
 
-async function verificarGanadorSemanal() {
+async function verificarGanadorSemanal() { // This function is now unused, but kept for context.
     const ahora = new Date();
-    if (ahora.getDay() !== 0) return; // Solo ejecutar los Domingos
+    if (ahora.getDay() !== 0) return; // Only execute on Sundays
 
-    const semanaActual = getWeekNumber(ahora);
+    const semanaActual = getWeekNumber(ahora); // This will still calculate week number
     
     // Consultar el anime con más votos de esta semana
     const { data, error } = await _db
@@ -2072,9 +2210,10 @@ async function cargarComentariosAdmin() {
 
     try {
         // 1. TRAEMOS REPORTES DE CHAT/ANIME Y REPORTES DE EPISODIOS
+        // Filtramos para traer solo los que NO han sido revisados aún
         const [resReportes, resEpisodios] = await Promise.all([
-            _db.from('reportes').select('*').order('id', { ascending: false }),
-            _db.from('reportes_episodios').select('*').order('fecha', { ascending: false })
+            _db.from('reportes').select('*').eq('revisado', false).order('id', { ascending: false }),
+            _db.from('reportes_episodios').select('*').eq('revisado', false).order('fecha', { ascending: false })
         ]);
 
         if (resReportes.error) throw resReportes.error;
@@ -2119,7 +2258,16 @@ async function cargarComentariosAdmin() {
             const grupos = {};
             for (const r of resReportes.data) {
                 const esChat = (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
-                const llaveGrupo = esChat ? r.motivo : `anime_${r.comentario_id}`;
+
+                // Agrupar reportes de chat por el usuario reportado para evitar saturación en el panel
+                let llaveGrupo;
+                if (esChat && r.motivo) {
+                    const matchUser = r.motivo.match(/\(Usuario:\s*([^)]+)\)/);
+                    const userReportado = matchUser ? matchUser[1].trim().toLowerCase() : "desconocido";
+                    llaveGrupo = `chat_u_${userReportado}`;
+                } else {
+                    llaveGrupo = esChat ? "chat_sin_info" : `anime_${r.comentario_id}`;
+                }
 
                 if (!grupos[llaveGrupo]) {
                     grupos[llaveGrupo] = {
@@ -2166,7 +2314,7 @@ async function cargarComentariosAdmin() {
                     d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(229, 9, 20, 0.12); border: 1px solid #e50914;";
                 }
 
-                const motivoLimpio = r.motivo.replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:').replace(/Motivo:\s*/, '').replace(/\| Mensaje:\s*"[^"]*"/, '').replace(/\(Usuario:\s*[^)]+\)/g, '').trim();
+                const motivoLimpio = r.motivo ? r.motivo.replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:').replace(/Motivo:\s*/, '').replace(/\| Mensaje:\s*"[^"]*"/, '').replace(/\(Usuario:\s*[^)]+\)/g, '').trim() : "Sin descripción";
                 const listaDenunciantes = grupo.denunciantes.map(u => `@${u}`).join(', ');
 
                 d.innerHTML = `
@@ -2245,10 +2393,10 @@ window.borrarReporteEpisodio = async function(id) {
     if (!confirmar) return;
 
     try {
-        const { error } = await _db.from('reportes_episodios').delete().eq('id', id);
+        const { error } = await _db.from('reportes_episodios').update({ revisado: true }).eq('id', id);
         if (!error) {
             // Aviso de éxito con estilo gold
-            goldAlert({ title: "ÉXITO", text: "¡Reporte borrado correctamente!", icon: "✔️" });
+            goldAlert({ title: "REVISADO", text: "El reporte se ha marcado como resuelto.", icon: "✔️" });
             cargarComentariosAdmin();
         }
     } catch (e) { console.error(e); }
@@ -2268,7 +2416,7 @@ window.borrarGrupoReportes = async function(ids) {
     try {
         const { error } = await _db
             .from('reportes')
-            .delete()
+            .update({ revisado: true })
             .in('id', ids);
 
         if (error) {
@@ -2498,6 +2646,15 @@ async function reproducirEpisodio(titulo, num) {
     ultimoEpisodioCargado = { titulo, num };
     const container = document.getElementById('video-player-container');
     const infoText = document.getElementById('video-ep-title');
+    
+    // --- AUTO-VISTO AL REPRODUCIR ---
+    // Buscamos el checkbox del episodio actual y lo marcamos si no lo está
+    const filaEp = document.querySelector(`.episode-row[data-ep="${num}"]`);
+    const cb = filaEp ? filaEp.querySelector('input[type="checkbox"]') : null;
+    if (cb && !cb.checked) {
+        cb.checked = true;
+        toggleEpisodioVisto(currentAnime.mal_id, num, cb);
+    }
     
     if (!container || !currentAnime) return;
 
