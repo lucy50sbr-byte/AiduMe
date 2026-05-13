@@ -1249,7 +1249,7 @@ function obtenerHtmlRacha(dias) {
     return `<span class="racha-item" title="Ver racha" 
                   onclick="event.stopPropagation(); goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' });"
                   style="cursor:pointer;">
-                <img src="insignias/racha${imgNum}.gif" style="height:28px; vertical-align:middle;">
+                <img src="insignias/racha${imgNum}.png" style="height:28px; vertical-align:middle;">
             </span>`;
 }
 
