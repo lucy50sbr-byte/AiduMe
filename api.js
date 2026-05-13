@@ -563,6 +563,7 @@ function escucharChatPrivado() {
                 if (receptor === uActual && document.getElementById('modal-chat-privado').style.display !== 'flex' && navigator.vibrate) {
                     console.log("📳 Vibrando por nuevo mensaje.");
                     navigator.vibrate(200); 
+                    reproducirSonidoChat();
 
                     // Si el perfil está abierto, refrescamos para mostrar el badge de no leídos en tiempo real
                     const seccionAmigos = document.getElementById('seccion-amigos-perfil');
@@ -3294,7 +3295,7 @@ async function cargarMensajesChat() {
             
             if (mencionDetectada) {
                 // --- SONIDO DE MENCIÓN ---
-                reproducirSonidoAnime();
+                reproducirSonidoChat();
                 lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
             }
         }
@@ -3353,11 +3354,24 @@ async function reportarMensajeChat(msjId, usuarioReportado) {
  * Reproduce un sonido de notificación estilo anime
  */
 function reproducirSonidoAnime() {
-    // He puesto un sonido tipo "Ding" limpio. 
-    // Puedes cambiar esta URL por un archivo .mp3 que tengas en tu carpeta (ej: 'sonidos/notif.mp3')
+    // Solo suena si NO está el reproductor activo en pantalla
+    if (document.getElementById('video-player-container')?.style.display !== 'none') return;
+
     const audio = new Audio('sonidos/notif.mp3');
     audio.volume = 0.5;
     audio.play().catch(e => console.warn("El audio requiere una interacción previa con la página para sonar.", e));
+}
+
+/**
+ * Reproduce un sonido para mensajes de chat y menciones
+ */
+function reproducirSonidoChat() {
+    // Solo suena si NO está el reproductor activo en pantalla
+    if (document.getElementById('video-player-container')?.style.display !== 'none') return;
+
+    const audio = new Audio('sonidos/chat.mp3');
+    audio.volume = 0.4;
+    audio.play().catch(e => {});
 }
 
 // Funciones para manejar los nuevos modales

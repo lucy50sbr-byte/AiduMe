@@ -34,6 +34,12 @@ function reproducirSonidoCompra() {
     audio.play().catch(e => console.warn("El audio de compra requiere una interacción previa.", e));
 }
 
+function reproducirSonidoEquipar() {
+    const audio = new Audio('sonidos/equip.mp3');
+    audio.volume = 0.4;
+    audio.play().catch(e => {});
+}
+
 const AVATARES_RANGOS = [
     { id: '1', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
     { id: '2', minLvl: 1, img: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka' },
@@ -245,6 +251,7 @@ async function comprarTema(id, costo) {
     if (perfil.temas_comprados?.includes(id)) {
         // Si ya lo tiene, simplemente lo equipamos
         await _db.from('perfiles').update({ tema_chat: id }).eq('nombre', currentUser);
+        reproducirSonidoEquipar();
         goldAlert({ title: "TEMA EQUIPADO", text: "Has cambiado el skin de tus mensajes.", icon: "✨" });
         actualizarPerfilDesdeSQL();
         if(typeof aplicarTemaChatLocal === 'function') aplicarTemaChatLocal();
@@ -310,6 +317,7 @@ async function comprarBackground(id, costo) {
     if (perfil.backgrounds_comprados?.includes(id)) {
         // Si ya lo tiene, simplemente lo equipamos
         await _db.from('perfiles').update({ background_id: id }).eq('nombre', currentUser);
+        reproducirSonidoEquipar();
         goldAlert({ title: "FONDO EQUIPADO", text: "Has cambiado el fondo de tu perfil.", icon: "✨" });
         actualizarPerfilDesdeSQL();
         return cerrarTienda();
@@ -1089,6 +1097,7 @@ async function cambiarAvatar(id, url) {
         if (document.getElementById('user-avatar')) document.getElementById('user-avatar').src = url;
         if (document.getElementById('nav-avatar')) document.getElementById('nav-avatar').src = url;
 
+        reproducirSonidoEquipar();
         cerrarSelectorAvatar();
         actualizarPerfilDesdeSQL(); // Refresca para aplicar cambios
         
