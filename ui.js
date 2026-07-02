@@ -118,8 +118,8 @@ async function abrirTienda() {
         div.innerHTML = `
             <img src="${av.img}" style="width:50px; border-radius:50%; border: 1px solid var(--gold); background:#111;">
             <div style="font-size:0.6rem; color:#fff; margin:5px 0;">${av.nombre}</div>
-            <button onclick="${yaComprado ? `cambiarAvatar('${av.id}', '${av.img}')` : `comprarAvatar('${av.id}', ${av.costo}, '${av.img}')`}" 
-                    style="background:var(--gold); border:none; border-radius:5px; font-size:0.6rem; padding:4px 8px; cursor:pointer; font-weight:bold;">
+            <button class="store-button" onclick="${yaComprado ? `cambiarAvatar('${av.id}', '${av.img}')` : `comprarAvatar('${av.id}', ${av.costo}, '${av.img}')`}" 
+                    style="background:var(--gold); border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
                 ${yaComprado ? 'USAR' : `💰 ${av.costo}`}
             </button>
         `;
@@ -137,8 +137,8 @@ async function abrirTienda() {
             div.innerHTML = `
                 <div style="width:20px; height:20px; background:${t.color}; border-radius:50%; margin:0 auto 5px; box-shadow: 0 0 10px ${t.color};"></div>
                 <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${t.nombre}</div>
-                <button onclick="comprarTema('${t.id}', ${yaComprado ? 0 : t.costo})" 
-                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                <button class="store-button" onclick="comprarTema('${t.id}', ${yaComprado ? 0 : t.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
                     ${yaComprado ? 'USAR' : `💰 ${t.costo}`}
                 </button>
             `;
@@ -157,8 +157,8 @@ async function abrirTienda() {
             div.innerHTML = `
                 <img src="stickers/${p.inicio}.gif" style="width:30px; height:30px; object-fit:contain; margin-bottom:5px;">
                 <div style="font-size:0.55rem; color:#fff; margin-bottom:5px;">${p.nombre}</div>
-                <button onclick="${yaComprado ? "goldAlert({title:'LISTO', text:'Pack activo en el chat', icon:'✨'})" : `comprarStickerPack('${p.id}', ${p.costo})`}" 
-                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                <button class="store-button" onclick="${yaComprado ? "goldAlert({title:'LISTO', text:'Pack activo en el chat', icon:'✨'})" : `comprarStickerPack('${p.id}', ${p.costo})`}" 
+                        style="background:var(--gold); border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
                     ${yaComprado ? 'USAR' : `💰 ${p.costo}`}
                 </button>`;
             gridStickers.appendChild(div);
@@ -178,8 +178,8 @@ async function abrirTienda() {
             div.innerHTML = `
                 <img src="${preview}" style="width:100%; height:40px; border-radius:8px; object-fit:cover; border: 1px solid var(--gold); background:#111;">
                 <div style="font-size:0.55rem; color:#fff; margin:5px 0;">${bg.nombre}</div>
-                <button onclick="comprarBackground('${bg.id}', ${yaComprado ? 0 : bg.costo})" 
-                        style="background:var(--gold); border:none; border-radius:5px; font-size:0.55rem; padding:4px 6px; cursor:pointer; font-weight:bold;">
+                <button class="store-button" onclick="comprarBackground('${bg.id}', ${yaComprado ? 0 : bg.costo})" 
+                        style="background:var(--gold); border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
                     ${yaComprado ? 'USAR' : `💰 ${bg.costo}`}
                 </button>
             `;
@@ -421,6 +421,9 @@ async function procesarPagoTarjeta() {
         const { data: p } = await _db.from('perfiles').select('email').ilike('nombre', currentUser).single();
         const validEmail = (p?.email && p.email.includes('@')) ? p.email : `${currentUser.toLowerCase()}@aidume.com`;
 
+        // Obtenemos el Device Fingerprint generado por el script de seguridad de Mercado Pago
+        const deviceId = window.MP_DEVICE_SESSION_ID || null;
+
         // Enviamos el token generado por MP a nuestra Edge Function
         const { data, error: funcError } = await _db.functions.invoke('verify-payment', {
             body: {
@@ -431,7 +434,9 @@ async function procesarPagoTarjeta() {
                 token: token,
                 payment_method_id: payment_method_id,
                 issuer_id: issuer_id,
-                installments: 1
+                installments: 1,
+                nombre: name,
+                deviceId: deviceId
             }
         });
 
@@ -612,6 +617,24 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
 
     // Control de visibilidad de herramientas de edición
     if (elementos.btnAvatar) elementos.btnAvatar.style.display = esMismoUsuario ? 'flex' : 'none';
+
+    // --- INYECCIÓN DE OPCIÓN PARA OCULTAR CHAT ---
+    if (esMismoUsuario && elementos.settings) {
+        let toggleChatRow = document.getElementById('setting-chat-toggle');
+        if (!toggleChatRow) {
+            toggleChatRow = document.createElement('div');
+            toggleChatRow.id = 'setting-chat-toggle';
+            toggleChatRow.className = 'config-item-pro';
+            elementos.settings.prepend(toggleChatRow); // Aparece al inicio de los ajustes
+        }
+        const isHidden = localStorage.getItem('hide_chat') === 'true';
+        toggleChatRow.innerHTML = `
+            <div class="config-info">
+                <span>Ocultar Chat Global</span>
+                <small>Desactiva la burbuja flotante</small>
+            </div>
+            <label class="custom-checkbox"><input type="checkbox" ${isHidden ? 'checked' : ''} onchange="toggleChatBubbleSetting(this.checked)"><span class="checkmark"></span></label>`;
+    }
     if (elementos.settings) elementos.settings.style.display = esMismoUsuario ? 'block' : 'none';
     if (elementos.btnNormas) elementos.btnNormas.style.display = esMismoUsuario ? 'flex' : 'none';
     
@@ -1029,6 +1052,16 @@ function abrirModalNormas() {
 function cerrarModalNormas() {
     const modal = document.getElementById('modal-normas');
     if (modal) modal.style.display = 'none';
+}
+
+function toggleChatBubbleSetting(ocultar) {
+    localStorage.setItem('hide_chat', ocultar);
+    const bubble = document.getElementById('chat-bubble');
+    if (bubble) bubble.style.display = ocultar ? 'none' : 'flex';
+    if (ocultar) {
+        const win = document.getElementById('chat-window');
+        if (win) win.style.display = 'none';
+    }
 }
 
 async function renderAvatarSelector(perfil, avatarActualId) {

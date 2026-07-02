@@ -9,6 +9,7 @@ let paginaFiltros = 1;
 let chatAmigoActual = null; // Usuario con el que se chatea en privado
 let wpChatChannel = null; // Canal de chat temporal
 let urlTransmisionActual = null; // URL para enviar a la TV
+let playbackSessionId = 0; // Sesión activa de reproducción para evitar cruce de anuncios
 
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
@@ -82,6 +83,21 @@ async function initApp() {
         window.history.replaceState(null, null, window.location.pathname);
         showDetails({ mal_id: parseInt(openId) });
     }
+
+    // --- SOPORTE PARA TECLA ENTER EN TODA LA APP ---
+    const inputsEnter = [
+        { id: 'busqueda', fn: buscarAnimeFusion },
+        { id: 'chat-input', fn: enviarMensajeChat },
+        { id: 'comment-input', fn: postearComentario },
+        { id: 'privado-input', fn: enviarMensajePrivado },
+        { id: 'wp-input-msg', fn: enviarMsgWatchParty },
+        { id: 'input-bio-nueva', fn: guardarNuevaBio }
+    ];
+
+    inputsEnter.forEach(item => {
+        const el = document.getElementById(item.id);
+        if (el) el.addEventListener('keydown', (e) => { if (e.key === 'Enter') item.fn(); });
+    });
 }
 
 // --- MEJORA: Intento de cierre automático al cerrar ventana ---
@@ -1261,16 +1277,19 @@ function obtenerHtmlRacha(dias) {
 async function verificarGanadorDiario() {
     const yesterdayString = getYesterdayString();
     
-    // Check if results for yesterday have already been processed
-    const { data: processedResult, error: resultError } = await _db
+    // 1. Intentamos obtener el bloqueo insertando la fila del resultado (evita múltiples procesos en paralelo)
+    const { error: lockError } = await _db
         .from('torneo_resultados_diarios')
-        .select('*')
-        .eq('dia', yesterdayString)
-        .single();
+        .insert({
+            dia: yesterdayString,
+            ganador_anime_id: null,
+            ganador_anime_titulo: null,
+            processed: true
+        });
 
-    if (processedResult && processedResult.processed) {
-        // console.log(`Resultados para ${yesterdayString} ya procesados.`);
-        return; // Already processed, do nothing
+    if (lockError) {
+        // Si hay error (como clave primaria duplicada), significa que ya se procesó o está en proceso por otro cliente
+        return;
     }
 
     // If not processed, calculate winner and distribute rewards
@@ -1283,14 +1302,8 @@ async function verificarGanadorDiario() {
         if (votesError) throw votesError;
 
         if (!votes || votes.length === 0) {
-            // No votes for yesterday, mark as processed without a winner
-            await _db.from('torneo_resultados_diarios').upsert({
-                dia: yesterdayString,
-                ganador_anime_id: null,
-                ganador_anime_titulo: null,
-                processed: true
-            }, { onConflict: 'dia' });
-            // console.log(`No votes for ${yesterdayString}. Marked as processed.`);
+            // No votes for yesterday, it's already marked as processed (winning fields remain null)
+            console.log(`No hubo votos para el torneo del día ${yesterdayString}.`);
             return;
         }
 
@@ -1316,51 +1329,76 @@ async function verificarGanadorDiario() {
         }
 
         // Distribute rewards and send notifications
-        const processedUsers = new Set(); // To avoid duplicate notifications for users who voted multiple times (though daily limit is 1 now)
+        const processedUsers = new Set(); // To avoid duplicate notifications/rewards for users who voted multiple times
         for (const vote of votes) {
             if (processedUsers.has(vote.usuario_nombre)) continue; // Skip if already processed for this user
 
-            if (vote.anime_id === winningAnimeId) {
-                // Winner! Double the bet
-                const reward = vote.apuesta * 2;
-                if (reward > 0) {
-                    await ganarRecompensaGold({ fichas: reward, silencioso: true });
-                    lanzarNotificacionSistema(
-                        "🏆 ¡GANASTE EL TORNEO DIARIO!",
-                        `¡Felicidades! Tu apuesta por "${vote.anime_titulo}" ha ganado. Has recibido ${reward} Aidufichas.`,
-                        'logo-grande.png' // Use a generic app logo
-                    );
+            const esGanador = (vote.anime_id === winningAnimeId);
+            const reward = esGanador ? (vote.apuesta * 2) : 0;
+
+            if (esGanador && reward > 0) {
+                // 1. Obtener las fichas actuales de ese usuario ganador (esté online u offline)
+                const { data: perfilGanador, error: getErr } = await _db
+                    .from('perfiles')
+                    .select('aidufichas')
+                    .ilike('nombre', vote.usuario_nombre)
+                    .single();
+
+                if (!getErr && perfilGanador) {
+                    const nuevasFichas = (perfilGanador.aidufichas || 0) + reward;
+                    // 2. Actualizar las fichas directamente en la base de datos para ese usuario específico
+                    await _db
+                        .from('perfiles')
+                        .update({ aidufichas: nuevasFichas })
+                        .ilike('nombre', vote.usuario_nombre);
+                    
+                    console.log(`🏆 Torneo Diario: Otorgadas ${reward} fichas a ${vote.usuario_nombre} (ganador).`);
+                }
+            }
+
+            // 3. Notificación local en el navegador del cliente SOLO si es el usuario conectado
+            if (currentUser && vote.usuario_nombre.toLowerCase() === currentUser.toLowerCase()) {
+                // Refrescar su UI en pantalla si está online
+                if (typeof actualizarPerfilDesdeSQL === 'function') {
+                    actualizarPerfilDesdeSQL();
+                }
+
+                if (esGanador) {
+                    if (reward > 0) {
+                        lanzarNotificacionSistema(
+                            "🏆 ¡GANASTE EL TORNEO DIARIO!",
+                            `¡Felicidades! Tu apuesta por "${vote.anime_titulo}" ha ganado. Has recibido ${reward} Aidufichas.`,
+                            'logo-grande.png'
+                        );
+                    } else {
+                        lanzarNotificacionSistema(
+                            "🏆 ¡GANASTE EL TORNEO DIARIO!",
+                            `¡Felicidades! Tu anime "${vote.anime_titulo}" ha ganado el torneo diario.`,
+                            'logo-grande.png'
+                        );
+                    }
                 } else {
                     lanzarNotificacionSistema(
-                        "🏆 ¡GANASTE EL TORNEO DIARIO!",
-                        `¡Felicidades! Tu anime "${vote.anime_titulo}" ha ganado el torneo diario.`,
+                        "😔 TORNEO DIARIO",
+                        `Tu apuesta por "${vote.anime_titulo}" no ha ganado el torneo de ayer. ¡Más suerte la próxima vez!`,
                         'logo-grande.png'
                     );
                 }
-            } else {
-                // Loser
-                lanzarNotificacionSistema(
-                    "😔 TORNEO DIARIO",
-                    `Tu apuesta por "${vote.anime_titulo}" no ha ganado el torneo de ayer. ¡Más suerte la próxima vez!`,
-                    'logo-grande.png'
-                );
             }
             processedUsers.add(vote.usuario_nombre);
         }
 
-        // Mark as processed in the results table
-        await _db.from('torneo_resultados_diarios').upsert({
-            dia: yesterdayString,
+        // 4. Actualizar el registro del resultado con el ganador real
+        await _db.from('torneo_resultados_diarios').update({
             ganador_anime_id: winningAnimeId,
             ganador_anime_titulo: winningAnimeTitle,
             processed: true
-        }, { onConflict: 'dia' });
+        }).eq('dia', yesterdayString);
 
         console.log(`Resultados del torneo diario para ${yesterdayString} procesados. Ganador: ${winningAnimeTitle}`);
 
     } catch (err) {
         console.error(`Error al procesar el ganador diario para ${yesterdayString}:`, err);
-        // Optionally, log this error to a monitoring system
     }
 }
 
@@ -2649,6 +2687,9 @@ async function reproducirEpisodio(titulo, num) {
     const container = document.getElementById('video-player-container');
     const infoText = document.getElementById('video-ep-title');
     
+    // Registramos esta sesión de reproducción para descartar hilos concurrentes si se cambia de video
+    const myPlayId = ++playbackSessionId;
+    
     // --- AUTO-VISTO AL REPRODUCIR ---
     // Buscamos el checkbox del episodio actual y lo marcamos si no lo está
     const filaEp = document.querySelector(`.episode-row[data-ep="${num}"]`);
@@ -2686,6 +2727,12 @@ async function reproducirEpisodio(titulo, num) {
         let seg = 20;
         await new Promise(resolve => {
             const timer = setInterval(() => {
+                // Si el usuario cambió de video, abortamos este contador y limpiamos
+                if (myPlayId !== playbackSessionId) {
+                    clearInterval(timer);
+                    resolve();
+                    return;
+                }
                 seg--;
                 const display = document.getElementById('segundos-espera');
                 if (display) display.innerText = seg;
@@ -2695,9 +2742,13 @@ async function reproducirEpisodio(titulo, num) {
                 }
             }, 1000);
         });
+
+        // Verificamos de nuevo tras la espera
+        if (myPlayId !== playbackSessionId) return;
     } else {
         // Si es premium, esperamos solo un suspiro para estabilidad
         await new Promise(resolve => setTimeout(resolve, 400));
+        if (myPlayId !== playbackSessionId) return;
     }
 
     // 1. LIMPIEZA
@@ -2717,6 +2768,8 @@ async function reproducirEpisodio(titulo, num) {
             .eq('episodio_num', num)
             .eq('idioma', idiomaActual)
             .maybeSingle();
+
+        if (myPlayId !== playbackSessionId) return;
 
         // --- LÓGICA DE LIMPIEZA DE IFRAME ---
         let urlSucia = (enlaceManual && enlaceManual.url_video) ? enlaceManual.url_video : "";
@@ -2738,6 +2791,8 @@ async function reproducirEpisodio(titulo, num) {
 
         // 2. CREACIÓN DEL REPRODUCTOR (Esperamos 200ms para asegurar estabilidad en Android)
         setTimeout(() => {
+            if (myPlayId !== playbackSessionId) return;
+
             const nuevoIframe = document.createElement('iframe');
             nuevoIframe.className = "video-iframe-aidume";
             nuevoIframe.style.width = "100%";
@@ -2757,20 +2812,20 @@ async function reproducirEpisodio(titulo, num) {
             
             // Scroll suave al reproductor para centrar la vista
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 200);
 
-        // 4. ACTUALIZAR TÍTULO E IDIOMA
-        if (infoText) {
-            urlTransmisionActual = urlFinal;
-            const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
-            infoText.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left;">
-                    <span>📺 Viendo: ${titulo} - Ep ${num} <img src="${flag}" style="width:16px; vertical-align:middle;"></span>
-                    <button onclick="transmitirTV()" class="btn-cast-gold">
-                        <i>📡</i> TV
-                    </button>
-                </div>`;
-        }
+            // 4. ACTUALIZAR TÍTULO E IDIOMA (Solo si este hilo sigue activo)
+            if (infoText) {
+                urlTransmisionActual = urlFinal;
+                const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
+                infoText.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left;">
+                        <span>📺 Viendo: ${titulo} - Ep ${num} <img src="${flag}" style="width:16px; vertical-align:middle;"></span>
+                        <button onclick="transmitirTV()" class="btn-cast-gold">
+                            <i>📡</i> TV
+                        </button>
+                    </div>`;
+            }
+        }, 200);
 
     } catch (err) {
         console.error("Error en el reproductor:", err);

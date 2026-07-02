@@ -826,18 +826,6 @@ header {
     margin-top: 10px;
 }
 
-@keyframes diceShake {
-    0% { transform: rotate(0deg); }
-    25% { transform: rotate(10deg); }
-    50% { transform: rotate(-10deg); }
-    75% { transform: rotate(5deg); }
-    100% { transform: rotate(0deg); }
-}
-
-.btn-random-gold:hover i, .btn-random-gold:hover {
-    animation: diceShake 0.5s infinite;
-}
-
 /* Contenedor relativo para posicionar la flecha */
 .scroll-wrapper {
     position: relative;
@@ -933,6 +921,15 @@ header {
     padding: 0 20px;
 }
 
+/* Juntamos los elementos del perfil (Nombre, Racha, Bio) */
+.profile-main-info h2#display-user { margin-bottom: 2px; }
+#display-rank { margin: 0 auto; display: block; }
+#display-bio { 
+    margin-top: 5px; 
+    font-size: 0.85rem; 
+    line-height: 1.2;
+}
+
 .avatar-wrapper {
     position: relative;
     width: 90px;
@@ -983,15 +980,40 @@ header {
 #display-rank .racha-item {
     position: relative;
     display: inline-block;
-    overflow: hidden; /* Necesario para que el brillo no se salga de la imagen */
+    overflow: hidden;
     border-radius: 15px;
 }
 
+#display-rank .racha-item::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -150%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.4) 50%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    transform: skewX(-25deg);
+    animation: rachaShine 4s infinite;
+    pointer-events: none; /* Para que no interfiera con los clics */
+}
+
 #display-rank .racha-item img {
-    width: 150px !important;
-    height: 450px !important;
+    width: auto !important;
+    height: 200px !important;
     object-fit: contain;
     display: block;
+    margin: 0 auto;
+}
+
+@keyframes rachaShine {
+    0% { left: -150%; }
+    20% { left: 150%; } /* El brillo pasa rápido */
+    100% { left: 150%; } /* Pausa larga antes de volver a empezar */
 }
 
 @keyframes rachaShimmer {
@@ -1284,6 +1306,7 @@ header {
     width: 100%;
     max-width: 350px;
     padding: 20px;
+    scrollbar-gutter: stable; /* Evita que el contenido salte horizontalmente cuando aparece el scroll */
 }
 
 .avatar-selector-grid {
@@ -1342,6 +1365,44 @@ header {
     transition: 0.3s;
     width: 100%;
     box-sizing: border-box;
+}
+
+/* Estilo para los botones de la tienda para evitar que se muevan */
+.store-button {
+    min-width: 80px; /* Ancho mínimo para acomodar textos como "💰 5000" */
+    height: 28px; /* Altura fija para todos los botones */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    font-size: 0.6rem !important; /* Unificamos el tamaño de fuente */
+    padding: 0 8px !important; /* Unificamos el padding horizontal, vertical se maneja con height */
+}
+
+/* Estabilización de los encabezados de categoría de la tienda (Avatares, Skins, etc.) */
+#modal-tienda .modal-gold-card > button[onclick*="toggleTiendaSeccion"] {
+    width: 100%;
+    height: 48px; /* Altura fija para evitar saltos verticales bruscos */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 215, 0, 0.05);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    color: var(--gold);
+    padding: 0 15px;
+    border-radius: 12px;
+    font-weight: 900;
+    font-size: 0.75rem;
+    cursor: pointer;
+    box-sizing: border-box;
+    margin-top: 10px;
+    transition: background 0.3s;
+}
+
+#modal-tienda .arrow {
+    width: 20px;
+    text-align: center;
+    display: inline-block;
 }
 
 .StripeElement--focus {

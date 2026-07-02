@@ -172,7 +172,8 @@ function finalizarLogin(perfil) {
     
     // Mostramos el icono de chat antes de cualquier otra acción
     const chatBubble = document.getElementById('chat-bubble');
-    if (chatBubble) {
+    const hideChat = localStorage.getItem('hide_chat') === 'true';
+    if (chatBubble && !hideChat) {
         chatBubble.style.display = 'flex';
     }
 
@@ -234,6 +235,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (captchaRefreshBtn) {
         captchaRefreshBtn.addEventListener('click', generarCaptcha);
     }
+
+    // Soporte para Enter en los campos de usuario y contraseña
+    ['reg-user', 'reg-pass', 'reg-email', 'reg-age', 'reg-captcha-input'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') ejecutarAuth();
+            });
+        }
+    });
 });
 
 let captchaActual = "";
@@ -302,8 +313,9 @@ window.addEventListener('load', solicitarPermisoNotificaciones);
 window.addEventListener('load', () => {
     const perfilGuardado = localStorage.getItem('aidume_profile');
     const chatBubble = document.getElementById('chat-bubble');
+    const hideChat = localStorage.getItem('hide_chat') === 'true';
     
-    if (perfilGuardado && chatBubble) {
+    if (perfilGuardado && chatBubble && !hideChat) {
         chatBubble.style.display = 'flex';
     } else if (chatBubble) {
         chatBubble.style.display = 'none';
