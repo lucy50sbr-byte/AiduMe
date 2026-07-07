@@ -781,6 +781,11 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
 
         renderCondecoraciones(condecoraciones);
 
+        // === AGREGAR BOTÓN VINCULAR TV ===
+        if (esMismoUsuario && typeof agregarBotonVincularTV === 'function') {
+            agregarBotonVincularTV();
+        }
+
     } catch (err) {
         console.error("Error al cargar el perfil de:", nombreAMostrar, err);
     }
@@ -1105,6 +1110,79 @@ function abrirSelectorAvatar() {
 function cerrarSelectorAvatar() {
     const modal = document.getElementById('modal-avatar');
     if (modal) modal.style.display = 'none';
+}
+
+// ===== SISTEMA DE VINCULACIÓN TV =====
+function mostrarModalVincularTV() {
+    goldAlert({
+        title: "📡 VINCULAR TV",
+        text: "Ingresa el código de 6 dígitos que aparece en tu TV:",
+        icon: "📺",
+        showInput: true,
+        showCancel: true,
+        confirmText: "VINCULAR",
+        inputPlaceholder: "Ej: 837291"
+    }).then(async (codigo) => {
+        if (!codigo || codigo.trim().length !== 6) {
+            if (codigo !== null) {
+                goldAlert({ title: "CÓDIGO INVÁLIDO", text: "El código debe tener 6 dígitos.", icon: "❌" });
+            }
+            return;
+        }
+        await vincularTV(codigo.trim());
+    });
+}
+
+async function vincularTV(codigo) {
+    if (!currentUser) {
+        return goldAlert({ title: "INICIA SESIÓN", text: "Debes estar logueado para vincular la TV.", icon: "👤" });
+    }
+    try {
+        const { data, error } = await _db.from('tv_access_codes').select('*').eq('codigo', codigo).single();
+        if (error || !data) {
+            return goldAlert({ title: "CÓDIGO INVÁLIDO", text: "El código no existe. Verifica que sea el mismo que ves en tu TV.", icon: "🔍" });
+        }
+        const ahora = new Date();
+        const expiracion = new Date(data.expiracion);
+        if (ahora > expiracion) {
+            return goldAlert({ title: "EXPIRADO", text: "El código ya expiró. Ve a tu TV y genera uno nuevo.", icon: "⏰" });
+        }
+        if (data.reclamado) {
+            return goldAlert({ title: "YA VINCULADO", text: "Este código ya fue usado por otro usuario.", icon: "❌" });
+        }
+        const { data: perfil } = await _db.from('perfiles')
+            .select('nombre, edad, rol, es_premium, avatar_id, ultimo_visto_chat')
+            .eq('nombre', currentUser).single();
+        if (!perfil) {
+            return goldAlert({ title: "ERROR", text: "No se pudo obtener tu perfil.", icon: "❌" });
+        }
+        const usuarioData = {
+            name: perfil.nombre, age: perfil.edad, rol: perfil.rol || 'user',
+            premium: perfil.es_premium || false, avatar_id: perfil.avatar_id || '1',
+            ultimo_visto_chat: perfil.ultimo_visto_chat
+        };
+        const { error: updateError } = await _db.from('tv_access_codes')
+            .update({ usuario: currentUser, usuario_data: usuarioData, reclamado: true }).eq('codigo', codigo);
+        if (updateError) throw updateError;
+        goldAlert({ title: "📡 TV VINCULADA", text: `✅ ¡Listo! La TV ya está sincronizada con @${currentUser}.`, icon: "🎉" });
+    } catch (err) {
+        console.error("Error al vincular TV:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo vincular la TV. Intenta de nuevo.", icon: "❌" });
+    }
+}
+
+function agregarBotonVincularTV() {
+    if (typeof esDispositivoTV === 'function' && esDispositivoTV()) return;
+    const settings = document.querySelector('.settings-container');
+    if (!settings) return;
+    if (document.getElementById('btn-vincular-tv')) return;
+    const btn = document.createElement('button');
+    btn.id = 'btn-vincular-tv';
+    btn.className = 'btn-normas';
+    btn.style.cssText = 'border-color:#00d4ff; color:#00d4ff; background:rgba(0,212,255,0.05); margin-bottom:10px;';
+    btn.innerHTML = '📡 VINCULAR TV';
+    btn.onclick = mostrarModalVincularTV;
+    settings.before(btn);
 }
 
 async function cambiarAvatar(id, url) {

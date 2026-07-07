@@ -69,6 +69,12 @@ async function ejecutarAuth() {
                 return;
             }
 
+            // 🛑 NUEVO: Solicitar permiso de notificaciones AQUÍ, directamente en el gesto del usuario
+            // (antes de cualquier async/await o modal) para que funcione en móvil.
+            if ("Notification" in window && Notification.permission === "default") {
+                Notification.requestPermission();
+            }
+
             // 3. Apertura del Reglamento de Oro (Sustituye al confirm)
             // Nota: El botón "ACEPTO" de este modal debe llamar a aceptarNormasRegistro()
             abrirNormasRegistro();
@@ -112,15 +118,32 @@ async function procederConRegistro() {
 
     try {
         // --- VALIDACIÓN DE ACCESO GOLD (NOTIFICACIONES) ---
-        const permission = await Notification.requestPermission();
+        // Ya pedimos permiso al inicio del registro (en ejecutarAuth para móvil).
+        // Aquí solo verificamos el estado actual sin intentar pedirlo de nuevo
+        // (en móvil, una segunda llamada fuera del gesto del usuario fallaría).
+        const permission = Notification.permission;
         if (permission !== 'granted') {
-            await goldAlert({
-                title: "ACCESO RESTRINGIDO",
-                text: "No podemos otorgarte el rango de usuario si el radar de notificaciones está bloqueado. La aplicación se reiniciará para proteger el sistema.",
-                icon: "🔐"
-            });
-            location.reload();
-            return;
+            // Si aún está "default", intentamos pedirlo ahora (último recurso)
+            if (permission === "default") {
+                const result = await Notification.requestPermission();
+                if (result !== 'granted') {
+                    await goldAlert({
+                        title: "ACCESO RESTRINGIDO",
+                        text: "No podemos otorgarte el rango de usuario si el radar de notificaciones está bloqueado. La aplicación se reiniciará para proteger el sistema.",
+                        icon: "🔐"
+                    });
+                    location.reload();
+                    return;
+                }
+            } else {
+                await goldAlert({
+                    title: "ACCESO RESTRINGIDO",
+                    text: "No podemos otorgarte el rango de usuario si el radar de notificaciones está bloqueado. La aplicación se reiniciará para proteger el sistema.",
+                    icon: "🔐"
+                });
+                location.reload();
+                return;
+            }
         }
 
         // 5. Control de IP (Máximo 2 cuentas)
@@ -309,6 +332,256 @@ function lanzarAnuncio() {
 
 // Llamar a la función al cargar la web
 window.addEventListener('load', solicitarPermisoNotificaciones);
+
+// Detección de TV/Android TV para ocultar el chat automáticamente
+function esDispositivoTV() {
+    const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+    
+    // Detecta Android TV, Google TV, Apple TV, Smart TV, consolas y dispositivos TV-box
+    const patronesTV = [
+        /Android.*TV/i,
+        /Google TV/i,
+        /Smart.?TV/i,
+        /AppleTV/i,
+        /Tizen/i,
+        /Web0?[sS]/i,       // Samsung TV / WebOS
+        /NetCast/i,          // LG TV
+        /Kylo/i,             // Firefox TV (Amazon Fire TV)
+        /AFT[TBMRS]/i,       // Amazon Fire TV (AFTT, AFTB, AFTR, AFTM, etc.)
+        /PlayStation/i,
+        /Xbox/i,
+        /Nintendo/i,
+        /BRAVIA/i,           // Sony Bravia
+        /Roku/i,
+        /Vizio/i,
+        /navigator\.tv/i,    // Opera TV
+        /DTV/i,              // Digital TV
+        /HbbTV/i,            // Hybrid Broadcast Broadband TV
+        /TV\s?[0-9]/i,
+        /Large Screen/i,
+        /PHILIPS/i,
+        /Panasonic/i,
+        /SHARP/i,
+        /HISENSE/i,
+        /TCL/i
+    ];
+
+    // También detectamos por tamaño de pantalla: si es > 50" típicamente es TV
+    // Y detectamos si NO tiene soporte táctil (típico en TVs)
+    const esPantallaGrande = window.screen && (
+        (window.screen.width >= 1280 && !('ontouchstart' in window) && !navigator.maxTouchPoints) ||
+        (window.screen.availWidth >= 1920 && navigator.maxTouchPoints <= 1)
+    );
+
+    // Detectar modo TV en navegadores: userAgentMode o la propiedad 'displayMode'
+    const esTVMode = window.matchMedia && (
+        window.matchMedia('(display-mode: standalone)').matches === false && // No es PWA
+        esPantallaGrande &&
+        ua.toLowerCase().includes('brave') === false && // No confundir Brave desktop con TV
+        ua.toLowerCase().includes('chrome') === false && // Evitar falsos positivos en PC con Chrome en 1920px
+        !navigator.userAgentData?.mobile &&
+        !navigator.userAgentData?.formFactor?.includes('desktop')
+    );
+
+    return patronesTV.some(p => p.test(ua)) || esTVMode;
+}
+
+// ===== SISTEMA DE ACCESO RÁPIDO PARA TV =====
+
+/**
+ * Genera un código PIN de 6 dígitos aleatorio
+ */
+function generarPinTv() {
+    return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+/**
+ * La TV genera un código y empieza a esperar que lo vinculen
+ */
+async function iniciarSesionTV() {
+    // Si ya hay sesión guardada, la usamos
+    const tvSession = localStorage.getItem('aidume_tv_session');
+    if (tvSession) {
+        const session = JSON.parse(tvSession);
+        if (session && session.usuario) {
+            console.log("📺 Sesión TV recuperada para:", session.usuario);
+            // Simulamos un login normal
+            currentUser = session.usuario;
+            localStorage.setItem('aidume_profile', JSON.stringify(session.usuario_data));
+            const overlay = document.getElementById('auth-overlay');
+            if (overlay) overlay.style.display = 'none';
+            if (typeof initApp === 'function') initApp();
+            return;
+        }
+    }
+
+    // Generar código
+    const codigo = generarPinTv();
+    const expiracion = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 min
+
+    try {
+        const { error } = await _db.from('tv_access_codes').insert([{
+            codigo: codigo,
+            expiracion: expiracion
+        }]);
+
+        if (error) throw error;
+
+        // Mostrar código en pantalla grande
+        const overlay = document.getElementById('auth-overlay');
+        if (overlay) {
+            overlay.innerHTML = `
+                <div class="auth-card tv-auth-card" style="max-width:380px;">
+                    <img src="logo-grande.png" alt="Logo" style="width:120px; margin-bottom:15px;">
+                    <h2 style="color:var(--gold); margin-bottom:10px; font-size:1.1rem;">📡 ACCEDE DESDE TU CELULAR</h2>
+                    <p style="color:#aaa; font-size:0.8rem; margin-bottom:20px;">
+                        Abre <strong>AiduMe</strong> en tu celular, ve a tu perfil y toca el botón <strong>"📡 Vincular TV"</strong>. Ingresa este código:
+                    </p>
+                    <div class="tv-pin-display" style="
+                        background: linear-gradient(135deg, #1a1a1a, #0d0d0d);
+                        border: 3px solid var(--gold);
+                        border-radius: 20px;
+                        padding: 25px 20px;
+                        margin: 15px auto;
+                        width: fit-content;
+                        min-width: 220px;
+                        box-shadow: 0 0 40px rgba(255, 215, 0, 0.2), inset 0 0 20px rgba(255, 215, 0, 0.05);
+                    ">
+                        <div style="font-size:3.2rem; font-weight:900; letter-spacing:12px; color:var(--gold); font-family:monospace; text-shadow: 0 0 20px rgba(255,215,0,0.3);" id="tv-pin-code">
+                            ${codigo}
+                        </div>
+                    </div>
+                    <p style="color:#666; font-size:0.7rem; margin-top:15px;">
+                        ⏳ El código expira en <span id="tv-countdown" style="color:var(--gold); font-weight:bold;">5:00</span> min
+                    </p>
+                    <button onclick="cancelarSesionTV()" class="btn-random-gold" style="margin-top:10px; width:100%; border-color:#ff4444; color:#ff4444;">
+                        CANCELAR
+                    </button>
+                </div>`;
+            overlay.style.display = 'flex';
+        }
+
+        // Contador regresivo
+        let segundosRestantes = 300;
+        let codigoActivo = codigo;
+
+        const intervaloContador = setInterval(() => {
+            segundosRestantes--;
+            const mins = Math.floor(segundosRestantes / 60);
+            const segs = segundosRestantes % 60;
+            const display = document.getElementById('tv-countdown');
+            if (display) display.innerText = `${mins}:${segs.toString().padStart(2, '0')}`;
+
+            if (segundosRestantes <= 0) {
+                clearInterval(intervaloContador);
+                if (window.tvPollingInterval) clearInterval(window.tvPollingInterval);
+                // Eliminar código expirado
+                _db.from('tv_access_codes').delete().eq('codigo', codigoActivo).then(() => {});
+                const overlay = document.getElementById('auth-overlay');
+                if (overlay) {
+                    overlay.innerHTML = `
+                        <div class="auth-card" style="text-align:center;">
+                            <p style="color:#ff4444; font-size:1rem;">⏰ Código expirado</p>
+                            <button onclick="location.reload()" class="btn-random-gold" style="margin-top:15px;">INTENTAR DE NUEVO</button>
+                        </div>`;
+                }
+            }
+        }, 1000);
+
+        // Cada 3 segundos verificar si el código fue reclamado
+        window.tvPollingInterval = setInterval(async () => {
+            const { data, error } = await _db.from('tv_access_codes')
+                .select('usuario, usuario_data, reclamado')
+                .eq('codigo', codigoActivo)
+                .single();
+
+            if (error) return;
+
+            if (data && data.reclamado && data.usuario && data.usuario_data) {
+                // Código reclamado! Iniciar sesión
+                clearInterval(intervaloContador);
+                if (window.tvPollingInterval) {
+                    clearInterval(window.tvPollingInterval);
+                    window.tvPollingInterval = null;
+                }
+
+                // Guardar sesión en TV
+                localStorage.setItem('aidume_tv_session', JSON.stringify({
+                    usuario: data.usuario,
+                    usuario_data: data.usuario_data
+                }));
+
+                // Simular login
+                const perfilData = typeof data.usuario_data === 'string' 
+                    ? JSON.parse(data.usuario_data) 
+                    : data.usuario_data;
+
+                currentUser = perfilData.name || data.usuario;
+                localStorage.setItem('aidume_profile', JSON.stringify(perfilData));
+
+                // Cerrar overlay y arrancar app
+                const overlay = document.getElementById('auth-overlay');
+                if (overlay) overlay.style.display = 'none';
+
+                goldAlert({
+                    title: "📡 TV VINCULADA",
+                    text: `Bienvenido @${data.usuario}. Sesión iniciada desde el celular.`,
+                    icon: "✅"
+                });
+
+                if (typeof initApp === 'function') initApp();
+            }
+        }, 3000);
+
+    } catch (err) {
+        console.error("Error al generar código TV:", err);
+        const overlay = document.getElementById('auth-overlay');
+        if (overlay) {
+            overlay.innerHTML = `
+                <div class="auth-card" style="text-align:center;">
+                    <p style="color:#ff4444;">Error de conexión. Intenta de nuevo.</p>
+                    <button onclick="location.reload()" class="btn-random-gold" style="margin-top:15px;">REINTENTAR</button>
+                </div>`;
+        }
+    }
+}
+
+/**
+ * Cancela la sesión de TV en curso
+ */
+function cancelarSesionTV() {
+    if (window.tvPollingInterval) {
+        clearInterval(window.tvPollingInterval);
+        window.tvPollingInterval = null;
+    }
+    location.reload();
+}
+
+/**
+ * Cierra la sesión de TV (borra la sesión guardada)
+ */
+function cerrarSesionTV() {
+    localStorage.removeItem('aidume_tv_session');
+    location.reload();
+}
+
+// Si se detecta TV, ocultar el chat y mostrar login rápido
+if (esDispositivoTV()) {
+    localStorage.setItem('hide_chat', 'true');
+    console.log("📺 Dispositivo TV detectado: Chat oculto automáticamente.");
+
+    // Agregar clase tv-device al body para que el CSS pueda adaptarse
+    document.documentElement.classList.add('tv-device');
+
+    // En vez del login normal, mostrar el sistema de código PIN
+    window.addEventListener('load', () => {
+        const perfil = localStorage.getItem('aidume_profile');
+        if (!perfil) {
+            // No hay sesión, iniciar flujo TV
+            setTimeout(() => iniciarSesionTV(), 500);
+        }
+    });
+}
 
 window.addEventListener('load', () => {
     const perfilGuardado = localStorage.getItem('aidume_profile');

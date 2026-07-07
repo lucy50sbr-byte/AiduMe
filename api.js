@@ -59,6 +59,7 @@ async function initApp() {
     setInterval(cargarHome, 604800000); // Actualización automática del Top 10 cada semana (7 días)
 
     escucharSolicitudesAmistad();
+    escucharInvitacionesWatchParty();
     actualizarNotificacionesPerfil(); 
     escucharNotificacionesGlobales();
 
@@ -100,6 +101,48 @@ async function initApp() {
     });
 }
 
+// ===== SISTEMA DE DETECCIÓN DE CONEXIÓN (OFFLINE OVERLAY) =====
+function mostrarOverlayOffline() {
+    const overlay = document.getElementById('offline-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        // Iniciar contador de reconexión automática (10 segundos)
+        let segundos = 10;
+        const countdownEl = document.getElementById('offline-countdown');
+        const interval = setInterval(() => {
+            segundos--;
+            if (countdownEl) countdownEl.innerText = segundos;
+            if (segundos <= 0) {
+                clearInterval(interval);
+                location.reload();
+            }
+        }, 1000);
+    }
+}
+
+function ocultarOverlayOffline() {
+    const overlay = document.getElementById('offline-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function verificarConexionApp() {
+    if (!navigator.onLine) {
+        mostrarOverlayOffline();
+        return false;
+    }
+    return true;
+}
+
+// Escuchar eventos de conexión/desconexión
+window.addEventListener('online', () => {
+    ocultarOverlayOffline();
+    location.reload(); // Recargar al recuperar conexión
+});
+
+window.addEventListener('offline', () => {
+    mostrarOverlayOffline();
+});
+
 // --- MEJORA: Intento de cierre automático al cerrar ventana ---
 window.addEventListener('beforeunload', () => {
     if (currentUser) {
@@ -120,10 +163,26 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function cargarHome() {
-    // Cambia esto en cargarHome() para que sea el Top de la Temporada Actual
-const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=10&order_by=members&sort=desc');
-    const j = await r.json();
-    renderGrid(j.data, 'lista');
+    try {
+        const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=10&order_by=members&sort=desc');
+        if (!r.ok) throw new Error('Error de red: ' + r.status);
+        const j = await r.json();
+        if (j.data && j.data.length > 0) {
+            renderGrid(j.data, 'lista');
+        } else {
+            console.warn("cargarHome: No data received, trying backup...");
+            // Fallback: top anime
+            const r2 = await fetch('https://api.jikan.moe/v4/top/anime?limit=10');
+            const j2 = await r2.json();
+            if (j2.data) renderGrid(j2.data, 'lista');
+        }
+    } catch (e) {
+        console.error("Error en cargarHome:", e);
+        const lista = document.getElementById('lista');
+        if (lista) {
+            lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
+        }
+    }
 }
 
 async function showDetails(a) {
@@ -208,12 +267,13 @@ async function showDetails(a) {
 
         const dibujarBotones = (cantidad) => {
     let html = "";
-    const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const nombreLimpio = nombreFinal.replace(/'/g, "\\'").replace(/"/g, '"');
     
     for (let i = 1; i <= cantidad; i++) {
         const isChecked = listaVistos.includes(i) ? 'checked' : '';
         html += `
-            <div class="episode-row" data-ep="${i}">
+            <div class="episode-row" data-ep="${i}" tabindex="0" 
+                 onkeydown="if(event.key==='Enter'){reproducirEpisodio('${nombreLimpio}', ${i});}">
                 <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                     <span class="play-icon">▶</span>
                     <div>
@@ -224,7 +284,8 @@ async function showDetails(a) {
                 
                 <div class="ep-check-area" style="display: flex !important; flex-direction: row !important; align-items: center !important; gap: 8px; min-width: 100px; justify-content: flex-end;">
                     
-                    <span onclick="event.stopPropagation(); reportarFalla(${i}, '${nombreLimpio}')" 
+                    <span tabindex="0" onclick="event.stopPropagation(); reportarFalla(${i}, '${nombreLimpio}')" 
+                          onkeydown="if(event.key==='Enter'){event.stopPropagation();reportarFalla(${i}, '${nombreLimpio}');}"
                           style="color: #ff4444; font-weight: bold; cursor: pointer; font-size: 1.3rem; padding: 5px; user-select: none;"
                           title="Reportar video caído">
                         !
@@ -240,6 +301,15 @@ async function showDetails(a) {
     }
     gridEps.innerHTML = html;
     if (epBadge) epBadge.innerText = `${cantidad} disponibles`;
+
+    // En TV, también quitamos el max-height del grid para que no haya scroll anidado
+    if (document.documentElement.classList.contains('tv-device')) {
+        const grid = document.getElementById('grid-episodios');
+        if (grid) {
+            grid.style.maxHeight = 'none';
+            grid.style.overflow = 'visible';
+        }
+    }
 };
 
         if (totalEps > 0) {
@@ -450,27 +520,241 @@ async function triggerAppUpdate() {
 }
 
 /**
- * Verifica si hay una nueva versión de la aplicación disponible y la recarga si es necesario.
+ * SISTEMA DE TRANSMISIÓN A SMART TV / ANDROID TV / TV BOX
+ * Soporta: Chromecast (WebCast), AirPlay, DLNA, y modo ventana emergente
  */
-async function checkForAppUpdate() {
-    try {
-        const { data } = await _db.from('app_settings').select('value').eq('key', 'app_version').single();
-        if (data && data.value && data.value !== lastAppVersionChecked) {
-            lastAppVersionChecked = data.value;
-            console.log("🚀 Nueva versión detectada. Recargando aplicación...");
-            location.reload(true); // Recarga forzada, ignorando caché
-        }
-    } catch (err) { /* Ignorar errores, la app seguirá funcionando */ }
+
+// Variable para controlar el estado de casting
+let castSession = null;
+let castInterval = null;
+
+async function transmitirTV() {
+    if (!urlTransmisionActual) return;
+
+    const opciones = await goldAlert({
+        title: "📺 TRANSMITIR A TV",
+        text: "¿Cómo quieres ver el contenido en tu TV?\n\n🏠 Misma red WiFi recomendado.",
+        icon: "📡",
+        showCancel: true,
+        confirmText: "SELECCIONAR MÉTODO",
+        showInput: false
+    });
+
+    if (!opciones) return;
+
+    // Mostramos el selector de métodos
+    const metodo = await goldAlert({
+        title: "🎯 SELECCIONA MÉTODO",
+        text: "1️⃣ Chromecast / Google Cast\n2️⃣ Android TV (Código PIN)\n3️⃣ Ventana Emergente\n4️⃣ Abrir en navegador TV",
+        icon: "📺",
+        showCancel: true,
+        confirmText: "SELECCIONAR",
+        showInput: true,
+        inputPlaceholder: "Número (1, 2, 3 o 4)"
+    });
+
+    if (!metodo) return;
+
+    switch(metodo.trim()) {
+        case '1':
+            await iniciarChromecast(urlTransmisionActual);
+            break;
+        case '2':
+            await iniciarCastPin(urlTransmisionActual);
+            break;
+        case '3':
+            abrirVentanaEmergente(urlTransmisionActual);
+            break;
+        case '4':
+            abrirEnTV(urlTransmisionActual);
+            break;
+        default:
+            goldAlert({ title: "OPCIÓN INVÁLIDA", text: "Elige 1, 2, 3 o 4.", icon: "❌" });
+    }
 }
 
-async function gestionarSolicitud(id, accion, nombreOtro) {
-    if (accion === 'aceptar') {
-        await _db.from('amistades').update({ estado: 'aceptada' }).eq('id', id);
-        goldAlert({ title: "¡NUEVO AMIGO!", text: `Ahora puedes chatear privado con @${nombreOtro}`, icon: "🤝" });
-    } else {
-        await _db.from('amistades').delete().eq('id', id);
+/**
+ * 1️⃣ CHROMECAST / GOOGLE CAST (WebCast)
+ * Usa la API nativa de Google Cast si está disponible
+ */
+async function iniciarChromecast(url) {
+    // Detectamos si el navegador soporta Casting nativo
+    const tieneCastNatvo = !!window.chrome && !!chrome.cast;
+    const tieneMediaSession = 'mediaSession' in navigator;
+    const esAndroid = /Android/i.test(navigator.userAgent);
+
+    if (tieneCastNatvo) {
+        try {
+            // Intentamos usar la API de Google Cast
+            const session = await chrome.cast.requestSession();
+            const mediaInfo = new chrome.cast.media.MediaInfo(url, 'text/html');
+            const request = new chrome.cast.media.LoadRequest(mediaInfo);
+            await session.loadMedia(request);
+            castSession = session;
+            
+            goldAlert({ title: "📡 CAST INICIADO", text: "Buscando en tu TV...\nVerifica que esté encendida.", icon: "✨" });
+            return;
+        } catch (e) {
+            console.warn("Cast nativo falló, usando alternativas:", e);
+        }
     }
-    actualizarPerfilDesdeSQL();
+
+    // Alternativa: Usar el menú de Cast del navegador (Chrome/Edge)
+    if (esAndroid) {
+        // En Android, usamos la API de MediaSession para habilitar el botón de Cast
+        try {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: currentAnime?.title || "AiduMe",
+                    artist: "AiduMe Gold",
+                    artwork: [{ src: currentAnime?.images?.jpg?.image_url || 'logo-grande.png', sizes: '512x512', type: 'image/png' }]
+                });
+                navigator.mediaSession.setActionHandler('seekforward', () => {});
+                navigator.mediaSession.setActionHandler('seekbackward', () => {});
+            }
+            
+            // Mostramos instrucciones para Android TV
+            await goldAlert({
+                title: "📱 ANDROID TV",
+                text: "1. Abre el video actual\n2. Toca el icono de 📺 o 🖥️ en los controles del video\n3. Selecciona tu TV\n\nO usa el menú de Cast de Chrome (tres puntos ⋮ > Transmitir...).",
+                icon: "📺",
+                confirmText: "ENTENDIDO"
+            });
+            
+            // Abrimos el video en pantalla completa para que aparezca el botón Cast
+            const container = document.getElementById('video-player-container');
+            const iframe = container?.querySelector('iframe');
+            if (iframe && container?.style.display !== 'none') {
+                maximizarVideoAidume(container);
+            }
+            return;
+        } catch (e) {
+            console.warn("Error en MediaSession:", e);
+        }
+    }
+
+    // Fallback: Instrucciones manuales
+    abrirVentanaEmergente(url);
+}
+
+/**
+ * 2️⃣ ANDROID TV / TV BOX: Transmisión por código QR + PIN
+ * Genera un código que el usuario ingresa en la TV
+ */
+async function iniciarCastPin(url) {
+    // Generamos un código temporal para la sesión
+    const sessionId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    
+    // Guardamos la sesión en Supabase (o localStorage como fallback)
+    const sessionData = {
+        url: url,
+        anime: currentAnime?.title || "Anime",
+        episodio: ultimoEpisodioCargado?.num || 1,
+        timestamp: Date.now()
+    };
+
+    try {
+        await _db.from('tv_cast_sessions').insert([{
+            session_id: sessionId,
+            usuario: currentUser,
+            data: sessionData,
+            expira: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+        }]);
+    } catch (e) {
+        // Fallback: guardamos en localStorage por si no hay tabla
+        localStorage.setItem('aidume_cast_session_' + sessionId, JSON.stringify(sessionData));
+        console.warn("Usando localStorage para cast session:", e);
+    }
+
+    await goldAlert({
+        title: "📡 CÓDIGO DE TRANSMISIÓN",
+        text: `Ve a tu Android TV / TV Box y abre AiduMe.\n\nEn la TV, selecciona "📡 Recibir" e ingresa este código:\n\n🔑 ${sessionId}\n\n⏳ El código expira en 5 minutos.\n\nAsegúrate de que ambos dispositivos estén en la MISMA RED WiFi.`,
+        icon: "📺",
+        confirmText: "¡LISTO!"
+    });
+
+    // Esperamos que la TV reclame la sesión (polling cada 3 segundos)
+    let intentos = 0;
+    const maxIntentos = 100; // ~5 minutos
+    
+    castInterval = setInterval(async () => {
+        intentos++;
+        
+        if (intentos > maxIntentos) {
+            clearInterval(castInterval);
+            goldAlert({ title: "⏰ EXPIRADO", text: "El código de transmisión ha expirado. Genera uno nuevo.", icon: "⏳" });
+            return;
+        }
+
+        try {
+            const { data } = await _db.from('tv_cast_sessions')
+                .select('reclamado')
+                .eq('session_id', sessionId)
+                .single();
+            
+            if (data?.reclamado) {
+                clearInterval(castInterval);
+                goldAlert({ title: "📡 TV CONECTADA", text: "Tu TV ha tomado el control de la reproducción.", icon: "✅" });
+            }
+        } catch (e) {
+            // Tabla no existe o error, detenemos polling
+            clearInterval(castInterval);
+        }
+    }, 3000);
+}
+
+/**
+ * 3️⃣ VENTANA EMERGENTE (Pop-up con el video)
+ */
+function abrirVentanaEmergente(url) {
+    const w = window.open(url, '_blank', 'width=800,height=600,scrollbars=yes');
+    if (!w || w.closed) {
+        goldAlert({
+            title: "🚫 BLOQUEADO",
+            text: "El navegador bloqueó la ventana.\n\n👉 Permite las ventanas emergentes para este sitio.\n\nO usa la opción 4 'Abrir en navegador TV'.",
+            icon: "⚠️",
+            confirmText: "ENTENDIDO"
+        });
+    } else {
+        goldAlert({ title: "✅ LISTO", text: "El video se abrirá en una nueva ventana. Puedes arrastrarla a tu TV si usas pantalla extendida.", icon: "📺" });
+    }
+}
+
+/**
+ * 4️⃣ ABRIR EN NAVEGADOR TV (Copia manual de URL)
+ */
+async function abrirEnTV(url) {
+    const confirmar = await goldAlert({
+        title: "📋 ENLACE PARA TV",
+        text: `Copia este enlace y pégalo en el navegador de tu Smart TV / TV Box / Consola:\n\n${url}\n\n¿Quieres acortar la URL?`,
+        icon: "🔗",
+        showCancel: true,
+        confirmText: "SÍ, AYUDA"
+    });
+
+    if (confirmar) {
+        try {
+            // Intenta copiar al portapapeles automáticamente
+            await navigator.clipboard.writeText(url);
+            goldAlert({
+                title: "📋 COPIADO",
+                text: "El enlace se copió a tu portapapeles. Pégalo en el navegador de tu TV.",
+                icon: "✅"
+            });
+        } catch (e) {
+            goldAlert({
+                title: "📄 MANUAL",
+                text: `Ve al navegador de tu TV y escribe:\n\n${url}`,
+                icon: "📺"
+            });
+        }
+    } else {
+        goldAlert({
+            title: "📄 MANUAL",
+            text: `Ve al navegador de tu TV y escribe:\n\n${url}`,
+            icon: "📺"
+        });
+    }
 }
 
 async function cargarChatPrivado(amigo) {
@@ -776,7 +1060,10 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
                         ${badgeNoLeidos}
                         <small style="font-size:0.6rem; opacity:0.5; margin-left:5px;">(${etiquetaTiempo})</small>
                     </div>
-                    <button onclick="cargarChatPrivado('${amigo}')" class="btn-random-gold" style="padding:4px 8px; margin:0;">💬 Chat</button>
+                    <div style="display:flex; gap:4px;">
+                        <button onclick="cargarChatPrivado('${amigo}')" class="btn-random-gold" style="padding:4px 8px; margin:0; font-size:0.6rem;">💬</button>
+                        <button onclick="invitarAVer('${amigo}')" class="btn-random-gold wp-invite-btn" style="padding:4px 8px; margin:0; font-size:0.6rem;">🎬</button>
+                    </div>
                 </div>`;
             });
         } else if (solicitudes?.length === 0) {
@@ -1788,12 +2075,6 @@ function agendarNotificacionAnilist(titulo, imagen, airingAt, animeId) {
 
 function irAnimeAzar() { fetch('https://api.jikan.moe/v4/random/anime').then(r=>r.json()).then(j=>showDetails(j.data)); }
 function hideDetails() { document.getElementById('details').style.display = "none"; }
-// CORRECCIÓN: Comillas invertidas para búsqueda manual
-function buscarAnime() { const q = document.getElementById('busqueda').value; fetch(`https://api.jikan.moe/v4/anime?q=${q}&limit=12`).then(r=>r.json()).then(j=>renderGrid(j.data, 'lista')); }
-
-// Vinculamos las llamadas de los eventos a la función maestra
-function buscarAnime() { buscarAnimeFusion(); }
-function buscarAnimeLive() { buscarAnimeFusion(); }
 
 async function cargarRelaciones(id) {
     const container = document.getElementById('anime-relations');
@@ -1807,14 +2088,25 @@ async function cargarRelaciones(id) {
         container.innerHTML = ""; // Limpiamos el cargando
 
         // Buscamos específicamente "Prequel" y "Sequel"
-        data.forEach(rel => {
+        for (const rel of data) {
             if (rel.relation === "Prequel" || rel.relation === "Sequel") {
-                rel.entry.forEach(entry => {
+                for (const entry of rel.entry) {
                     const btn = document.createElement('div');
                     btn.className = 'relation-card';
                     const tipo = rel.relation === "Prequel" ? "⏪ Precuela" : "⏩ Secuela";
                     
+                    // Obtenemos la imagen del anime relacionado
+                    let imgUrl = 'placeholder.png';
+                    try {
+                        const imgRes = await fetch(`https://api.jikan.moe/v4/anime/${entry.mal_id}`);
+                        const imgJson = await imgRes.json();
+                        imgUrl = imgJson.data?.images?.jpg?.image_url || 'placeholder.png';
+                    } catch (e) {
+                        console.warn("No se pudo cargar imagen de relación:", entry.mal_id);
+                    }
+                    
                     btn.innerHTML = `
+                        <img src="${imgUrl}" style="width:100%; height:120px; object-fit:cover; border-radius:8px; margin-bottom:5px;" loading="lazy">
                         <div style="font-size:0.7rem; color:var(--gold); font-weight:bold;">${tipo}</div>
                         <div style="font-size:0.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${entry.name}</div>
                     `;
@@ -1828,9 +2120,9 @@ async function cargarRelaciones(id) {
                     };
                     
                     container.appendChild(btn);
-                });
+                }
             }
-        });
+        }
 
         if (container.innerHTML === "") {
             container.innerHTML = "<p style='font-size:0.8rem; opacity:0.3;'>Sin precuelas o secuelas conocidas.</p>";
@@ -2421,7 +2713,6 @@ async function cargarComentariosAdmin() {
 }*/
 
 window.borrarReporteEpisodio = async function(id) {
-    // CAMBIO AQUÍ: Usamos el nuevo cartel Gold
     const confirmar = await goldAlert({
         title: "CONFIRMAR",
         text: "¿Estás seguro de marcar este reporte como arreglado?",
@@ -2433,11 +2724,16 @@ window.borrarReporteEpisodio = async function(id) {
     if (!confirmar) return;
 
     try {
-        const { error } = await _db.from('reportes_episodios').update({ revisado: true }).eq('id', id);
+        // Usamos DELETE en lugar de update({ revisado: true }) porque la tabla
+        // reportes_episodios NO tiene columna 'revisado'. Al eliminar el registro
+        // directamente, garantizamos que desaparezca del panel de administración.
+        const { error } = await _db.from('reportes_episodios').delete().eq('id', id);
         if (!error) {
-            // Aviso de éxito con estilo gold
             goldAlert({ title: "REVISADO", text: "El reporte se ha marcado como resuelto.", icon: "✔️" });
             cargarComentariosAdmin();
+        } else {
+            console.error("Error al eliminar reporte:", error);
+            goldAlert({ title: "ERROR", text: "No se pudo eliminar el reporte. Intenta de nuevo.", icon: "❌" });
         }
     } catch (e) { console.error(e); }
 };
@@ -3045,6 +3341,8 @@ async function unirseAWatchParty(party) {
     // 1. Salimos de la vista de perfil para evitar que el overlay de detalles quede bloqueado
     const host = party.host_name;
     const guest = party.guest_name || currentUser;
+    const esHost = (host === currentUser);
+    const amigo = esHost ? guest : host;
 
     if (typeof showPage === 'function') showPage('home');
 
@@ -3062,13 +3360,12 @@ async function unirseAWatchParty(party) {
         setTimeout(() => {
             reproducirEpisodio(animeCompleto.title, party.ep_num);
 
-            // --- ACTIVAR CHAT TEMPORAL ---
-            activarChatWatchParty(host, guest);
+            // --- ACTIVAR WATCH PARTY MEJORADO ---
+            wpAbrirModal(esHost, animeCompleto, party.ep_num, amigo);
             
-            const esHost = (party.host_name === currentUser);
             goldAlert({ 
                 title: esHost ? "SALA CREADA" : "SALA VINCULADA", 
-                text: esHost ? "Tu invitación ha sido procesada." : `Viendo anime junto a @${party.host_name}`, 
+                text: esHost ? "Tu invitación ha sido procesada." : `Viendo anime junto a @${host}`, 
                 icon: "✨" 
             });
         }, 1200);
@@ -3078,24 +3375,234 @@ async function unirseAWatchParty(party) {
     }
 }
 
-/**
- * Crea un canal de comunicación directo entre Host y Invitado
- */
-function activarChatWatchParty(host, guest) {
-    // Generamos un ID de sala único basado en ambos nombres ordenados alfabéticamente
-    const roomID = [host, guest].sort().join('-').replace(/\s/g, '_');
-    
-    document.getElementById('wp-chat-box').style.display = 'flex';
-    document.getElementById('wp-msg-list').innerHTML = `<p class="wp-msg-item" style="opacity:0.6; text-align:center;">--- Chat Privado Activado ---</p>`;
+// ===== WATCH PARTY MEJORADO CON SINCRONIZACIÓN =====
+let wpRoomId = null;
+let wpEsHost = false;
+let wpAnimeActual = null;
+let wpEpActual = 1;
+let wpYouTubePlayer = null;
+let wpYouTubeReady = false;
+let wpSyncInterval = null;
+let wpUltimoSync = { playing: false, time: 0 };
+let wpIgnorarSync = false; // Evita loops de sincronización
 
-    // Suscribirse al canal de Broadcast
-    wpChatChannel = _db.channel(`wp-room-${roomID}`)
+/**
+ * Abre el modal de Watch Party y configura el canal de sincronización
+ */
+function wpAbrirModal(esHost, anime, ep, amigo) {
+    wpEsHost = esHost;
+    wpAnimeActual = anime;
+    wpEpActual = ep || 1;
+    
+    const modal = document.getElementById('wp-modal');
+    const titleEl = document.getElementById('wp-anime-title');
+    const roleEl = document.getElementById('wp-role-label');
+    const epEl = document.getElementById('wp-ep-label');
+    const statusEl = document.getElementById('wp-status-indicator');
+    const syncStatusEl = document.getElementById('wp-sync-status');
+    
+    titleEl.innerText = anime?.title || "Anime";
+    roleEl.innerText = esHost ? '👑 Host' : '🎮 Invitado';
+    epEl.innerText = `Episodio ${wpEpActual}`;
+    statusEl.className = 'wp-status-live';
+    statusEl.innerText = '📡 EN VIVO';
+    syncStatusEl.innerText = '🔗 Sincronizado';
+    
+    // Limpiar chat
+    const chatArea = document.getElementById('wp-msg-list');
+    chatArea.innerHTML = `<div class="wp-msg-item" style="opacity:0.6; text-align:center;">--- Watch Party Iniciada ---</div>`;
+    
+    // Generar room ID
+    const miUser = currentUser.trim();
+    const otroUser = amigo.trim();
+    wpRoomId = [miUser, otroUser].sort().join('-').replace(/\s/g, '_');
+    
+    // Crear/obtener canal Broadcast
+    if (wpChatChannel) {
+        _db.removeChannel(wpChatChannel);
+    }
+    
+    wpChatChannel = _db.channel(`wp-room-${wpRoomId}`)
     .on('broadcast', { event: 'shout' }, (payload) => {
         recibirMsgWatchParty(payload.payload);
     })
-    .subscribe();
+    .on('broadcast', { event: 'sync' }, (payload) => {
+        wpRecibirSync(payload.payload);
+    })
+    .subscribe((status) => {
+        console.log(`📡 WP Canal (${wpRoomId}):`, status);
+    });
+    
+    modal.style.display = 'flex';
+    
+    // Si es host, iniciar envío periódico de sync
+    if (esHost) {
+        wpIniciarSyncHost();
+    }
 }
 
+/**
+ * Inicia el envío periódico de estado de reproducción (solo Host)
+ */
+function wpIniciarSyncHost() {
+    if (wpSyncInterval) clearInterval(wpSyncInterval);
+    
+    wpSyncInterval = setInterval(() => {
+        if (!wpChatChannel || !wpEsHost) return;
+        
+        const iframe = document.querySelector('.video-iframe-aidume');
+        if (!iframe) return;
+        
+        // Intentar detectar estado del reproductor
+        // Para YouTube, intentamos comunicación vía postMessage
+        let playing = false;
+        let currentTime = 0;
+        
+        // Verificamos si el iframe está visible y tiene src
+        const container = document.getElementById('video-player-container');
+        if (container && container.style.display !== 'none' && iframe.src && !iframe.src.includes('about:blank')) {
+            playing = true;
+            // Estimamos tiempo basado en elapsed desde que empezó
+            if (wpUltimoSync.playing) {
+                currentTime = wpUltimoSync.time + 1; // +1 segundo cada tick
+            }
+        }
+        
+        const syncData = {
+            playing: playing,
+            time: currentTime,
+            episode: wpEpActual,
+            animeId: wpAnimeActual?.mal_id,
+            timestamp: Date.now()
+        };
+        
+        wpChatChannel.send({
+            type: 'broadcast',
+            event: 'sync',
+            payload: syncData
+        });
+        
+        wpUltimoSync = syncData;
+    }, 3000); // Cada 3 segundos
+}
+
+/**
+ * Recibe un evento de sincronización del Host
+ */
+function wpRecibirSync(data) {
+    if (wpEsHost) return; // El host no se sincroniza consigo mismo
+    if (wpIgnorarSync) return;
+    
+    const statusEl = document.getElementById('wp-status-indicator');
+    const syncStatusEl = document.getElementById('wp-sync-status');
+    const epLabel = document.getElementById('wp-ep-label');
+    
+    // Actualizar episodio si cambió
+    if (data.episode && data.episode !== wpEpActual) {
+        wpEpActual = data.episode;
+        epLabel.innerText = `Episodio ${wpEpActual}`;
+        
+        // Si el invitado tiene el anime abierto, cambiar de episodio
+        if (currentAnime && currentAnime.mal_id === data.animeId) {
+            reproducirEpisodio(currentAnime.title, wpEpActual);
+        }
+    }
+    
+    // Actualizar estado visual
+    if (data.playing) {
+        statusEl.className = 'wp-status-live';
+        statusEl.innerText = '📡 EN VIVO';
+        syncStatusEl.innerText = '🔗 Sincronizado';
+    } else {
+        statusEl.className = 'wp-status-paused';
+        statusEl.innerText = '⏸️ PAUSADO';
+        syncStatusEl.innerText = '⏸️ Pausado por el Host';
+    }
+    
+    // Intentar sincronizar el iframe del invitado
+    wpIntentarSyncIframe(data);
+}
+
+/**
+ * Intenta sincronizar el iframe del invitado (YouTube API)
+ */
+function wpIntentarSyncIframe(data) {
+    const iframe = document.querySelector('.video-iframe-aidume');
+    if (!iframe) return;
+    
+    // Para YouTube, usamos la API de postMessage
+    if (iframe.src && iframe.src.includes('youtube.com')) {
+        try {
+            if (data.playing) {
+                iframe.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+            } else {
+                iframe.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+            }
+            if (data.time > 0) {
+                iframe.contentWindow.postMessage(`{"event":"command","func":"seekTo","args":[${data.time},true]}`, '*');
+            }
+        } catch(e) {
+            console.warn("WP: No se pudo controlar el iframe de YouTube", e);
+        }
+    }
+}
+
+/**
+ * El invitado solicita sincronización forzada al Host
+ */
+function wpSolicitarSync() {
+    if (!wpChatChannel || wpEsHost) return;
+    
+    const btn = document.getElementById('wp-btn-sync');
+    btn.innerText = '⏳ Solicitando...';
+    btn.disabled = true;
+    
+    // Enviamos petición de sync al host
+    wpChatChannel.send({
+        type: 'broadcast',
+        event: 'shout',
+        payload: { user: '🎬 Sistema', text: `@${currentUser} solicita sincronización...` }
+    });
+    
+    // Re-enviamos el último sync conocido para forzar actualización
+    if (wpUltimoSync) {
+        wpIntentarSyncIframe(wpUltimoSync);
+    }
+    
+    setTimeout(() => {
+        btn.innerText = '🔄 Sincronizar';
+        btn.disabled = false;
+    }, 2000);
+}
+
+/**
+ * Envía un comando de sincronización manual (Host controla)
+ */
+function wpEnviarComando(comando, valor) {
+    if (!wpChatChannel || !wpEsHost) return;
+    
+    const syncData = {
+        playing: comando === 'play',
+        time: comando === 'seek' ? valor : wpUltimoSync.time,
+        episode: wpEpActual,
+        animeId: wpAnimeActual?.mal_id,
+        timestamp: Date.now(),
+        comando: comando,
+        valor: valor
+    };
+    
+    wpChatChannel.send({
+        type: 'broadcast',
+        event: 'sync',
+        payload: syncData
+    });
+    
+    wpUltimoSync = syncData;
+}
+
+/**
+ * Envía mensaje de chat en el Watch Party
+ */
 function enviarMsgWatchParty() {
     const input = document.getElementById('wp-input-msg');
     const text = input.value.trim();
@@ -3103,25 +3610,64 @@ function enviarMsgWatchParty() {
 
     const msgData = { user: currentUser, text: text };
     
-    // Enviamos el mensaje al otro
     wpChatChannel.send({
         type: 'broadcast',
         event: 'shout',
         payload: msgData,
     });
 
-    // Lo mostramos para nosotros
     recibirMsgWatchParty(msgData);
     input.value = "";
 }
 
+/**
+ * Recibe y muestra un mensaje del chat Watch Party
+ */
 function recibirMsgWatchParty(data) {
     const list = document.getElementById('wp-msg-list');
     const item = document.createElement('div');
     item.className = "wp-msg-item";
-    item.innerHTML = `<b>${data.user}:</b> ${data.text}`;
+    
+    if (data.user === '🎬 Sistema') {
+        item.style.color = '#ff8c00';
+        item.style.fontStyle = 'italic';
+        item.style.fontSize = '0.75rem';
+        item.innerHTML = data.text;
+    } else {
+        item.innerHTML = `<b>${data.user}:</b> ${data.text}`;
+    }
+    
     list.appendChild(item);
     list.scrollTop = list.scrollHeight;
+}
+
+/**
+ * Cierra y limpia el Watch Party
+ */
+function salirWatchParty() {
+    const modal = document.getElementById('wp-modal');
+    modal.style.display = 'none';
+    
+    // Limpiar canal
+    if (wpChatChannel) {
+        _db.removeChannel(wpChatChannel);
+        wpChatChannel = null;
+    }
+    
+    // Limpiar intervalos
+    if (wpSyncInterval) {
+        clearInterval(wpSyncInterval);
+        wpSyncInterval = null;
+    }
+    
+    wpRoomId = null;
+    wpEsHost = false;
+    wpAnimeActual = null;
+    wpYouTubePlayer = null;
+    wpYouTubeReady = false;
+    wpUltimoSync = { playing: false, time: 0 };
+    
+    console.log("🚪 Watch Party finalizada.");
 }
 
 
@@ -3820,4 +4366,296 @@ async function iniciarBusquedaVoz() {
     };
 
     rec.start();
+}
+
+// ===== SISTEMA DE MENTORÍA =====
+
+/**
+ * Carga y renderiza la sección de mentoría en el perfil
+ */
+async function cargarSeccionMentoria(perfil) {
+    const seccion = document.getElementById('seccion-mentoria');
+    const contenido = document.getElementById('contenido-mentoria');
+    if (!seccion || !contenido || !currentUser) return;
+
+    const esMismoUsuario = (currentUser === perfil.nombre);
+    if (!esMismoUsuario) {
+        seccion.style.display = 'none';
+        return;
+    }
+
+    seccion.style.display = 'block';
+    let html = "";
+
+    try {
+        // 1. Verificar si el usuario ya tiene mentoría activa como mentor o mentee
+        const { data: mentoriasActivas } = await _db.from('mentorias')
+            .select('*')
+            .or(`and(mentor_nombre.ilike."${currentUser}",estado.eq.activa),and(mentee_nombre.ilike."${currentUser}",estado.eq.activa)`);
+
+        const mentoriaActiva = mentoriasActivas && mentoriasActivas.length > 0 ? mentoriasActivas[0] : null;
+
+        if (mentoriaActiva) {
+            const soyMentor = mentoriaActiva.mentor_nombre.toLowerCase() === currentUser.toLowerCase();
+            const otroUsuario = soyMentor ? mentoriaActiva.mentee_nombre : mentoriaActiva.mentor_nombre;
+            
+            // Obtener datos del otro usuario
+            const { data: otroPerfil } = await _db.from('perfiles')
+                .select('nivel, avatar_id, online, ultima_conexion')
+                .ilike('nombre', otroUsuario)
+                .single();
+
+            const avatarUrl = otroPerfil ? (() => {
+                const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+                const av = todos.find(a => a.id === String(otroPerfil.avatar_id || '1'));
+                return av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${otroUsuario}`;
+            })() : '';
+
+            const badgeRol = soyMentor ? '🎓 MENTOR' : '📖 APRENDIZ';
+            const badgeColor = soyMentor ? '#00d4ff' : '#ffd700';
+
+            html += `
+                <div class="mentor-card" style="border-color: ${badgeColor};">
+                    <div class="mentor-header">
+                        <img src="${avatarUrl}" class="mentor-avatar" style="border-color: ${badgeColor};">
+                        <div>
+                            <span class="mentor-badge" style="border-color: ${badgeColor}; color: ${badgeColor};">${badgeRol} ACTIVO</span>
+                            <div class="mentor-name" onclick="verPerfilAjeno('${otroUsuario}')">@${otroUsuario}</div>
+                        </div>
+                    </div>
+                    <div class="mentor-stats">Nivel: ${otroPerfil?.nivel || '?'} • Recompensas: ${mentoriaActiva.recompensas_otorgadas || 0}</div>
+                </div>`;
+        } else {
+            // 2. No tiene mentoría activa - Mostrar opciones
+            const { data: solicitudesPendientes } = await _db.from('mentorias')
+                .select('*')
+                .or(`and(mentor_nombre.ilike."${currentUser}",estado.eq.pendiente),and(mentee_nombre.ilike."${currentUser}",estado.eq.pendiente)`)
+                .order('fecha_solicitud', { ascending: false });
+
+            // Mostrar solicitudes pendientes
+            if (solicitudesPendientes && solicitudesPendientes.length > 0) {
+                html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold;">SOLICITUDES PENDIENTES:</p>`;
+                solicitudesPendientes.forEach(s => {
+                    const soyMentor = s.mentor_nombre.toLowerCase() === currentUser.toLowerCase();
+                    const otroUser = soyMentor ? s.mentee_nombre : s.mentor_nombre;
+                    
+                    html += `
+                        <div class="mentor-solicitud-item">
+                            <span class="solicitud-info">
+                                ${soyMentor ? '📖' : '🎓'} <b>@${otroUser}</b> quiere ser tu ${soyMentor ? 'aprendiz' : 'mentor'}
+                            </span>
+                            <div style="display:flex; gap:5px;">
+                                <button onclick="aceptarMentoria(${s.id})" class="btn-random-gold" style="padding:4px 8px; margin:0;">✔️</button>
+                                <button onclick="rechazarMentoria(${s.id})" class="btn-random-gold" style="padding:4px 8px; margin:0; border-color:red; color:red;">❌</button>
+                            </div>
+                        </div>`;
+                });
+                html += `<div style="border-top:1px solid rgba(255,215,0,0.1); margin:10px 0;"></div>`;
+            }
+
+            // Opción para registrarse como mentor (requiere nivel >= 5)
+            const nivelSuficiente = (perfil.nivel || 0) >= 5;
+            const esMentorRegistrado = perfil.es_mentor;
+
+            if (nivelSuficiente && !esMentorRegistrado) {
+                html += `
+                    <button onclick="registrarComoMentor()" class="btn-mentor">
+                        🎓 CONVERTIRSE EN MENTOR
+                    </button>
+                    <p class="mentor-info-text">Como Mentor, otros usuarios podrán solicitarte como su guía. Ganarás fichas cuando tu aprendiz progrese.</p>`;
+            } else if (esMentorRegistrado) {
+                html += `
+                    <button class="btn-mentor active-mentor" onclick="desactivarModoMentor()">
+                        🎓 MENTOR ACTIVO
+                    </button>
+                    <p class="mentor-info-text">Estás disponible como mentor. Los aprendices pueden solicitarte. Toca para desactivar.</p>`;
+                
+                // Mostrar lista de mentores disponibles
+                html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold; margin-top:10px;">🔍 BUSCAR MENTOR:</p>`;
+                html += await buscarMentoresDisponiblesHTML();
+            } else {
+                html += `<p class="mentor-info-text">⭐ Necesitas ser Nivel 5 para convertirte en Mentor.</p>`;
+                html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold; margin-top:10px;">🔍 BUSCAR MENTOR:</p>`;
+                html += await buscarMentoresDisponiblesHTML();
+            }
+
+            if (!nivelSuficiente && !esMentorRegistrado) {
+                html += `<p class="mentor-info-text">📖 También puedes buscar un mentor que te guíe en tu experiencia AiduMe.</p>`;
+            }
+        }
+
+    } catch (err) {
+        console.error("Error cargando sección mentoría:", err);
+        html = `<p class="mentor-info-text">Error al cargar el sistema de mentoría.</p>`;
+    }
+
+    contenido.innerHTML = html;
+}
+
+/**
+ * Busca mentores disponibles y devuelve HTML
+ */
+async function buscarMentoresDisponiblesHTML() {
+    try {
+        const { data: mentores } = await _db.from('perfiles')
+            .select('nombre, nivel, avatar_id, online')
+            .eq('es_mentor', true)
+            .neq('nombre', currentUser)
+            .limit(10);
+
+        if (!mentores || mentores.length === 0) {
+            return `<p class="mentor-info-text">No hay mentores disponibles en este momento.</p>`;
+        }
+
+        const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+        let html = "";
+        mentores.forEach(m => {
+            const av = todos.find(a => a.id === String(m.avatar_id || '1'));
+            const urlAv = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${m.nombre}`;
+            html += `
+                <div class="mentor-card">
+                    <div class="mentor-header">
+                        <span class="${m.online ? 'online-dot' : 'offline-dot'}" style="margin-right:8px;"></span>
+                        <img src="${urlAv}" class="mentor-avatar">
+                        <div>
+                            <div class="mentor-name" onclick="verPerfilAjeno('${m.nombre}')">@${m.nombre}</div>
+                            <div class="mentor-stats">Nivel ${m.nivel || 1}</div>
+                        </div>
+                    </div>
+                    <button onclick="solicitarMentor('${m.nombre}')" class="btn-mentor" style="width:100%;">
+                        📖 SOLICITAR COMO MENTOR
+                    </button>
+                </div>`;
+        });
+        return html;
+    } catch (err) {
+        console.error("Error buscando mentores:", err);
+        return `<p class="mentor-info-text">Error al buscar mentores.</p>`;
+    }
+}
+
+/**
+ * Registra al usuario como mentor disponible
+ */
+async function registrarComoMentor() {
+    if (!currentUser) return;
+    
+    const confirmar = await goldAlert({
+        title: "SER MENTOR",
+        text: "¿Quieres convertirte en Mentor de Oro? Otros usuarios podrán solicitarte como guía. Ganarás recompensas cuando tus aprendices progresen.",
+        icon: "🎓",
+        showCancel: true,
+        confirmText: "SÍ, SER MENTOR"
+    });
+    
+    if (confirmar) {
+        await _db.from('perfiles').update({ es_mentor: true }).ilike('nombre', currentUser);
+        goldAlert({ title: "MENTOR ACTIVADO", text: "¡Ya eres un Mentor de Oro! Los aprendices podrán encontrarte.", icon: "🎓" });
+        actualizarPerfilDesdeSQL();
+    }
+}
+
+/**
+ * Desactiva el modo mentor
+ */
+async function desactivarModoMentor() {
+    if (!currentUser) return;
+    const confirmar = await goldAlert({ title: "DESACTIVAR MENTOR", text: "¿Dejar de estar disponible como mentor?", icon: "❓", showCancel: true });
+    if (confirmar) {
+        await _db.from('perfiles').update({ es_mentor: false }).ilike('nombre', currentUser);
+        goldAlert({ title: "MENTOR DESACTIVADO", text: "Ya no aparecerás en la lista de mentores.", icon: "👋" });
+        actualizarPerfilDesdeSQL();
+    }
+}
+
+/**
+ * Solicita ser aprendiz de un mentor
+ */
+async function solicitarMentor(nombreMentor) {
+    if (!currentUser) return;
+    
+    const { data: existente } = await _db.from('mentorias')
+        .select('id')
+        .or(`and(mentor_nombre.ilike."${nombreMentor}",mentee_nombre.ilike."${currentUser}"),and(mentor_nombre.ilike."${currentUser}",mentee_nombre.ilike."${nombreMentor}")`);
+    
+    if (existente && existente.length > 0) {
+        return goldAlert({ title: "YA EXISTE", text: "Ya hay una relación de mentoría entre ustedes.", icon: "📂" });
+    }
+
+    const { error } = await _db.from('mentorias').insert([{
+        mentor_nombre: nombreMentor.trim(),
+        mentee_nombre: currentUser.trim(),
+        estado: 'pendiente',
+        fecha_solicitud: new Date().toISOString()
+    }]);
+
+    if (error) {
+        console.error("Error al solicitar mentor:", error);
+        return goldAlert({ title: "ERROR", text: "No se pudo enviar la solicitud.", icon: "❌" });
+    }
+
+    goldAlert({ title: "SOLICITUD ENVIADA", text: `Has solicitado a @${nombreMentor} como mentor. Espera su respuesta.`, icon: "📨" });
+    actualizarPerfilDesdeSQL();
+}
+
+/**
+ * Acepta una mentoría
+ */
+async function aceptarMentoria(id) {
+    await _db.from('mentorias').update({ estado: 'activa', fecha_inicio: new Date().toISOString() }).eq('id', id);
+    goldAlert({ title: "MENTORÍA ACTIVADA", text: "Ahora tienes una relación de mentoría activa.", icon: "🤝" });
+    actualizarPerfilDesdeSQL();
+}
+
+/**
+ * Rechaza una mentoría
+ */
+async function rechazarMentoria(id) {
+    await _db.from('mentorias').delete().eq('id', id);
+    goldAlert({ title: "RECHAZADA", text: "La solicitud de mentoría ha sido rechazada.", icon: "❌" });
+    actualizarPerfilDesdeSQL();
+}
+
+/**
+ * Otorga recompensas al mentor cuando el mentee progresa
+ */
+async function verificarRecompensaMentor(xpGanada) {
+    if (!currentUser) return;
+
+    try {
+        // Buscar si el usuario actual es mentee de alguien
+        const { data: mentorias } = await _db.from('mentorias')
+            .select('*')
+            .ilike('mentee_nombre', currentUser)
+            .eq('estado', 'activa');
+
+        if (!mentorias || mentorias.length === 0) return;
+
+        const mentoria = mentorias[0];
+        const mentorName = mentoria.mentor_nombre;
+
+        // Cada 10 XP ganados, el mentor recibe 5 fichas
+        const nuevasRecompensas = Math.floor(xpGanada / 10);
+        if (nuevasRecompensas > 0) {
+            // Dar fichas al mentor
+            const { data: mentorPerfil } = await _db.from('perfiles')
+                .select('aidufichas')
+                .ilike('nombre', mentorName)
+                .single();
+
+            if (mentorPerfil) {
+                const nuevasFichas = (mentorPerfil.aidufichas || 0) + (nuevasRecompensas * 5);
+                await _db.from('perfiles').update({ aidufichas: nuevasFichas }).ilike('nombre', mentorName);
+            }
+
+            // Actualizar contador de recompensas
+            await _db.from('mentorias')
+                .update({ recompensas_otorgadas: (mentoria.recompensas_otorgadas || 0) + nuevasRecompensas })
+                .eq('id', mentoria.id);
+
+            console.log(`🎓 Recompensa de mentoría: ${nuevasRecompensas * 5} fichas para ${mentorName}`);
+        }
+    } catch (err) {
+        console.error("Error en verificarRecompensaMentor:", err);
+    }
 }
