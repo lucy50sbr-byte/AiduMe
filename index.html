@@ -201,6 +201,43 @@
             <div class="xp-container-pro"><div id="xp-bar" class="xp-bar-fill"></div></div>
         </div>
 
+        <!-- ===== SECCIÓN DE ESTADÍSTICAS DE VISUALIZACIÓN ===== -->
+        <div id="seccion-estadisticas" class="inner-badges-box" style="margin-top: 20px;">
+            <h3 class="section-title-gold centered">📊 ESTADÍSTICAS DE VISUALIZACIÓN</h3>
+            <div id="estadisticas-grid" class="stats-grid-pro">
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">🎬</div>
+                    <div class="stat-card-value" id="stat-episodios-totales">0</div>
+                    <div class="stat-card-label">Episodios Vistos</div>
+                </div>
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">⏱️</div>
+                    <div class="stat-card-value" id="stat-horas-totales">0</div>
+                    <div class="stat-card-label">Horas Estimadas</div>
+                </div>
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">📺</div>
+                    <div class="stat-card-value" id="stat-animes-completados">0</div>
+                    <div class="stat-card-label">Animes Completados</div>
+                </div>
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">💬</div>
+                    <div class="stat-card-value" id="stat-comentarios-hechos">0</div>
+                    <div class="stat-card-label">Comentarios</div>
+                </div>
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">⭐</div>
+                    <div class="stat-card-value" id="stat-valoraciones-hechas">0</div>
+                    <div class="stat-card-label">Valoraciones</div>
+                </div>
+                <div class="stat-card-gold">
+                    <div class="stat-card-icon">🔥</div>
+                    <div class="stat-card-value" id="stat-racha-actual">0</div>
+                    <div class="stat-card-label">Racha (días)</div>
+                </div>
+            </div>
+        </div>
+
         <div id="seccion-amigos-perfil" class="inner-badges-box" style="margin-top: 20px; display: none;">
             <h3 class="section-title-gold centered">👥 Amigos y Solicitudes</h3>
             <div id="lista-amigos-u" class="badge-grid-pro" style="flex-direction: column; align-items: stretch; gap: 10px;"></div>
@@ -508,43 +545,52 @@
     </div>
 </div>
 
-<!-- ===== WATCH PARTY MODAL ===== -->
-<div id="wp-modal" class="modal-gold-overlay" style="display:none;">
-    <div class="modal-gold-card wp-modal-card">
+<!-- ===== WATCH PARTY FLOTANTE ===== -->
+<div id="wp-floating-container" class="wp-floating-container" style="display:none;">
+    <button id="wp-toggle-btn" class="wp-toggle-btn" onclick="wpToggleChat()">💬 Mostrar Chat</button>
+    <div id="wp-modal" class="wp-floating-card">
         <!-- Header -->
-        <div class="wp-header">
+        <div class="wp-header" style="cursor: move;" id="wp-drag-handle">
             <div class="wp-header-left">
                 <span id="wp-status-indicator" class="wp-status-live">📡 EN VIVO</span>
-                <span id="wp-anime-title" class="wp-anime-name">Cargando...</span>
+                <span id="wp-anime-title" class="wp-anime-name" style="font-size: 0.8rem;">Cargando...</span>
             </div>
-            <button onclick="salirWatchParty()" class="wp-close-btn">✖</button>
+            <div style="display:flex; gap: 5px;">
+                <button onclick="wpToggleChat()" class="wp-close-btn">_</button>
+                <button onclick="salirWatchParty()" class="wp-close-btn" style="color: #ff4444;">✖</button>
+            </div>
         </div>
 
-        <!-- Sync Info -->
-        <div class="wp-sync-bar">
-            <span id="wp-role-label">👑 Host</span>
-            <span id="wp-ep-label">Episodio 1</span>
-            <span id="wp-sync-status">🔗 Sincronizado</span>
+        <!-- Sync & Voice Info -->
+        <div class="wp-sync-bar" style="display:flex; justify-content: space-between; align-items: center;">
+            <div style="display:flex; flex-direction:column; gap:2px;">
+                <span id="wp-role-label">👑 Host</span>
+                <span id="wp-ep-label">Episodio 1</span>
+            </div>
+            <div style="display:flex; gap: 5px; align-items: center;">
+                <button id="wp-voice-btn" onclick="toggleWpVoice()" class="btn-random-gold" style="padding: 4px 8px; font-size: 0.7rem; margin:0;">🎤 Unirse a Voz</button>
+                <span id="wp-sync-status" style="font-size:0.65rem;">🔗 Sinc.</span>
+            </div>
         </div>
 
         <!-- Chat Area -->
-        <div class="wp-chat-area" id="wp-msg-list">
+        <div class="wp-chat-area" id="wp-msg-list" style="max-height: 200px;">
         </div>
 
         <!-- Input -->
         <div class="chat-input-area" style="background: transparent; padding: 0; border-top: 1px solid rgba(255,215,0,0.15); padding-top: 8px;">
-            <input type="text" id="wp-input-msg" placeholder="Escribe un mensaje..." 
-                   style="flex: 1; background: #222; border: 1px solid var(--gold); color: white; padding: 10px; border-radius: 8px; outline: none;">
-            <button onclick="enviarMsgWatchParty()" style="background: var(--gold); border: none; border-radius: 8px; padding: 10px 15px; cursor: pointer;">🚀</button>
+            <input type="text" id="wp-input-msg" placeholder="Escribe..." 
+                   style="flex: 1; background: rgba(0,0,0,0.5); border: 1px solid var(--gold); color: white; padding: 8px; border-radius: 8px; outline: none; font-size:0.85rem;">
+            <button onclick="enviarMsgWatchParty()" style="background: var(--gold); border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer;">🚀</button>
         </div>
 
         <!-- Bottom controls -->
-        <div class="wp-controls">
-            <button id="wp-btn-sync" onclick="wpSolicitarSync()" class="btn-random-gold" style="flex:1; margin:0; font-size:0.7rem;">🔄 Sincronizar</button>
-            <button onclick="salirWatchParty()" class="btn-random-gold" style="flex:1; margin:0; border-color:#ff4444; color:#ff4444; font-size:0.7rem;">🚪 Salir</button>
+        <div class="wp-controls" style="margin-top: 5px;">
+            <button id="wp-btn-sync" onclick="wpSolicitarSync()" class="btn-random-gold" style="flex:1; margin:0; font-size:0.7rem; padding:5px;">🔄 Sincronizar</button>
         </div>
     </div>
 </div>
+
 
 <div id="modal-alerta" class="modal-gold-overlay" style="display:none;">
     <div class="modal-gold-card" style="text-align: center;">

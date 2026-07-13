@@ -781,6 +781,24 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
 
         renderCondecoraciones(condecoraciones);
 
+        // === CARGAR ESTADÍSTICAS DE VISUALIZACIÓN ===
+        const statsData = await calcularEstadisticasVisualizacion(nombreAMostrar);
+        if (statsData) {
+            const elEpisodios = document.getElementById('stat-episodios-totales');
+            const elHoras = document.getElementById('stat-horas-totales');
+            const elAnimesComp = document.getElementById('stat-animes-completados');
+            const elComentarios = document.getElementById('stat-comentarios-hechos');
+            const elValoraciones = document.getElementById('stat-valoraciones-hechas');
+            const elRacha = document.getElementById('stat-racha-actual');
+
+            if (elEpisodios) elEpisodios.innerText = statsData.episodios.toLocaleString();
+            if (elHoras) elHoras.innerText = statsData.horasTexto;
+            if (elAnimesComp) elAnimesComp.innerText = statsData.animesCompletados;
+            if (elComentarios) elComentarios.innerText = statsData.comentarios.toLocaleString();
+            if (elValoraciones) elValoraciones.innerText = statsData.valoraciones.toLocaleString();
+            if (elRacha) elRacha.innerText = statsData.racha;
+        }
+
         // === AGREGAR BOTÓN VINCULAR TV ===
         if (esMismoUsuario && typeof agregarBotonVincularTV === 'function') {
             agregarBotonVincularTV();

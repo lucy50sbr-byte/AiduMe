@@ -11,6 +11,277 @@ let wpChatChannel = null; // Canal de chat temporal
 let urlTransmisionActual = null; // URL para enviar a la TV
 let playbackSessionId = 0; // Sesión activa de reproducción para evitar cruce de anuncios
 
+// --- CACHÉ DE JIKAN PARA CARGA RÁPIDA ---
+const _jikanCache = {};
+
+// --- CACHÉ DE ANILIST PARA RESPALDO ---
+const _anilistCache = {};
+
+/**
+ * Helper: Realiza fetch con timeout y devuelve { ok, data, error, source }
+ * Primero intenta Jikan, si falla intenta Anilist como respaldo.
+ * @param {string} jikanUrl - URL de Jikan
+ * @param {Function} anilistFallback - Función asíncrona que hace la consulta a Anilist
+ */
+async function fetchWithFallback(jikanUrl, anilistFallback, cacheKey = null) {
+    // 1. Intentar Jikan primero
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    
+    try {
+        const res = await fetch(jikanUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) {
+            // Si es 504 (MAL caído) o 429 (rate limit), lanzamos para ir al fallback
+            throw new Error(`HTTP ${res.status}`);
+        }
+        
+        const json = await res.json();
+        if (json.data && json.data.length > 0) {
+            if (cacheKey) _jikanCache[cacheKey] = json.data;
+            return { ok: true, data: json.data, pagination: json.pagination, source: 'jikan' };
+        }
+        throw new Error("Empty data from Jikan");
+    } catch (err) {
+        clearTimeout(timeoutId);
+        console.warn("Jikan falló, intentando Anilist como respaldo:", err.message);
+        
+        // 2. Fallback a Anilist
+        try {
+            const anilistData = await anilistFallback();
+            if (anilistData && anilistData.length > 0) {
+                if (cacheKey) _anilistCache[cacheKey] = anilistData;
+                return { ok: true, data: anilistData, pagination: null, source: 'anilist' };
+            }
+            throw new Error("Empty data from Anilist");
+        } catch (fallbackErr) {
+            console.error("Anilist también falló:", fallbackErr.message);
+            return { ok: false, data: null, pagination: null, source: 'none', error: fallbackErr.message };
+        }
+    }
+}
+
+/**
+ * Adaptador: Convierte datos de Anilist al formato MAL-like que usa la app
+ */
+function adaptAnilistToMALFormat(anilistData) {
+    if (!anilistData || !Array.isArray(anilistData)) return [];
+    return anilistData.map(item => ({
+        mal_id: item.idMal || item.id,
+        title: item.title?.romaji || item.title?.english || item.title?.native || "Sin título",
+        titles: [
+            { type: 'Default', title: item.title?.romaji },
+            { type: 'English', title: item.title?.english }
+        ].filter(t => t.title),
+        images: {
+            jpg: {
+                image_url: item.coverImage?.large || item.coverImage?.medium || 'placeholder.png',
+                large_image_url: item.coverImage?.extraLarge || item.coverImage?.large || 'placeholder.png',
+                small_image_url: item.coverImage?.medium || 'placeholder.png'
+            }
+        },
+        synopsis: item.description || "Sin descripción disponible.",
+        episodes: item.episodes || 0,
+        status: item.status === 'RELEASING' ? 'Currently Airing' : 
+                item.status === 'FINISHED' ? 'Finished Airing' : 'Not yet aired',
+        score: item.averageScore ? (item.averageScore / 20) : 0,
+        type: item.format || 'TV',
+        season: item.season || null,
+        year: item.seasonYear || null,
+        genres: item.genres || [],
+        _viewCount: 0,
+        _source: 'anilist'
+    }));
+}
+
+/**
+ * Consulta a Anilist para obtener un anime específico por su MAL ID
+ */
+async function fetchAnilistByMalId(malId) {
+    const graphqlQuery = `
+    query ($idMal: Int) {
+      Media(idMal: $idMal, type: ANIME) {
+        id
+        idMal
+        title { romaji english native }
+        coverImage { extraLarge large medium }
+        description
+        episodes
+        status
+        averageScore
+        format
+        season
+        seasonYear
+        genres
+      }
+    }`;
+    
+    try {
+        const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ query: graphqlQuery, variables: { idMal: malId } })
+        });
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (json.data?.Media) {
+            return adaptAnilistToMALFormat([json.data.Media])[0];
+        }
+        return null;
+    } catch (e) {
+        console.warn(`Anilist fetch failed for MAL ID ${malId}:`, e);
+        return null;
+    }
+}
+
+/**
+ * Obtiene metadatos de múltiples animes desde Anilist por lotes (máximo 50 por consulta)
+ */
+async function fetchAnilistBatch(malIds) {
+    if (!malIds || malIds.length === 0) return {};
+    
+    const results = {};
+    const toFetch = malIds.filter(id => {
+        if (_anilistCache[id]) { results[id] = _anilistCache[id]; return false; }
+        return true;
+    });
+    
+    if (toFetch.length === 0) return results;
+    
+    // Anilist permite consultar hasta 50 por vez con MEDIA_TRENDING
+    // Pero para IDs específicos, hacemos consultas individuales en paralelo (lotes de 5)
+    for (let i = 0; i < toFetch.length; i += 5) {
+        const batch = toFetch.slice(i, i + 5);
+        const promises = batch.map(id => fetchAnilistByMalId(id));
+        const batchResults = await Promise.all(promises);
+        batch.forEach((id, idx) => {
+            if (batchResults[idx]) {
+                results[id] = batchResults[idx];
+                _anilistCache[id] = batchResults[idx];
+            }
+        });
+        if (i + 5 < toFetch.length) await new Promise(r => setTimeout(r, 200));
+    }
+    return results;
+}
+
+/**
+ * Consulta a Anilist para búsqueda por texto
+ */
+async function searchAnilist(query, page = 1, perPage = 24) {
+    const graphqlQuery = `
+    query ($search: String, $page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        media(search: $search, sort: POPULARITY_DESC, type: ANIME) {
+          id
+          idMal
+          title { romaji english native }
+          coverImage { extraLarge large medium }
+          description
+          episodes
+          status
+          averageScore
+          format
+          season
+          seasonYear
+          genres
+        }
+      }
+    }`;
+    
+    const res = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query: graphqlQuery, variables: { search: query, page, perPage } })
+    });
+    
+    if (!res.ok) throw new Error(`Anilist search HTTP ${res.status}`);
+    const json = await res.json();
+    return adaptAnilistToMALFormat(json.data?.Page?.media || []);
+}
+
+/**
+ * Consulta a Anilist para listado por popularidad/página
+ */
+async function listAnilist(page = 1, perPage = 24) {
+    const graphqlQuery = `
+    query ($page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        media(sort: POPULARITY_DESC, type: ANIME) {
+          id
+          idMal
+          title { romaji english native }
+          coverImage { extraLarge large medium }
+          description
+          episodes
+          status
+          averageScore
+          format
+          season
+          seasonYear
+          genres
+        }
+      }
+    }`;
+    
+    const res = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query: graphqlQuery, variables: { page, perPage } })
+    });
+    
+    if (!res.ok) throw new Error(`Anilist list HTTP ${res.status}`);
+    const json = await res.json();
+    return adaptAnilistToMALFormat(json.data?.Page?.media || []);
+}
+
+/**
+ * Obtiene datos de un anime desde Jikan con caché en memoria.
+ * Si ya se pidió antes, devuelve el resultado cacheado instantáneamente.
+ */
+async function fetchJikanCached(malId) {
+    if (_jikanCache[malId]) return _jikanCache[malId];
+    try {
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}`);
+        if (res.ok) {
+            const json = await res.json();
+            if (json.data) {
+                _jikanCache[malId] = json.data;
+                return json.data;
+            }
+        }
+    } catch (e) {
+        console.warn(`Jikan fetch failed for ${malId}:`, e);
+    }
+    return null;
+}
+
+/**
+ * Obtiene datos de múltiples anime en paralelo por lotes de 3
+ * (respetando el rate limit de Jikan de 3 req/seg).
+ */
+async function fetchJikanBatch(malIds) {
+    const results = {};
+    const toFetch = malIds.filter(id => {
+        if (_jikanCache[id]) { results[id] = _jikanCache[id]; return false; }
+        return true;
+    });
+
+    // Procesar en lotes de 3 en paralelo
+    for (let i = 0; i < toFetch.length; i += 3) {
+        const batch = toFetch.slice(i, i + 3);
+        const promises = batch.map(id => fetchJikanCached(id));
+        const batchResults = await Promise.all(promises);
+        batch.forEach((id, idx) => {
+            if (batchResults[idx]) results[id] = batchResults[idx];
+        });
+        // Solo esperar si hay más lotes por procesar
+        if (i + 3 < toFetch.length) await new Promise(r => setTimeout(r, 350));
+    }
+    return results;
+}
+
 // Lista de palabras que activarán la alerta roja
 const PALABRAS_PROHIBIDAS = ["insulto1", "insulto2", "spam", "ofensa"];
 
@@ -35,8 +306,13 @@ function getYesterdayString() {
 
 function parsearMensajeParaStickers(texto) {
     if (!texto) return "";
-    const regex = /\[STK:([^\]]+)\]/g;
-    return texto.replace(regex, '<img src="$1" class="chat-sticker">');
+    let nuevoTexto = texto.replace(/\[STK:([^\]]+)\]/g, '<img src="$1" class="chat-sticker">');
+    // Regex para detectar invitaciones a Watch Party
+    const wpRegex = /\[WP_INVITE:([^:]+):([^:]+):([^\]]+)\]/g;
+    nuevoTexto = nuevoTexto.replace(wpRegex, (match, animeId, epNum, hostName) => {
+        return `<button onclick="unirseAWatchPartyDesdeChat('${animeId}', '${epNum}', '${hostName}')" class="btn-random-gold" style="margin-top:5px; padding: 4px 8px; font-size:0.7rem; width:100%;">🍿 Unirse a Sala de ${hostName}</button>`;
+    });
+    return nuevoTexto;
 }
 
 async function initApp() {
@@ -59,7 +335,7 @@ async function initApp() {
     setInterval(cargarHome, 604800000); // Actualización automática del Top 10 cada semana (7 días)
 
     escucharSolicitudesAmistad();
-    escucharInvitacionesWatchParty();
+    iniciarCanalDedicadoUsuario();
     actualizarNotificacionesPerfil(); 
     escucharNotificacionesGlobales();
 
@@ -163,25 +439,53 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function cargarHome() {
+    const lista = document.getElementById('lista');
+    if (!lista) return;
+
     try {
-        const r = await fetch('https://api.jikan.moe/v4/seasons/now?limit=10&order_by=members&sort=desc');
-        if (!r.ok) throw new Error('Error de red: ' + r.status);
-        const j = await r.json();
-        if (j.data && j.data.length > 0) {
-            renderGrid(j.data, 'lista');
-        } else {
-            console.warn("cargarHome: No data received, trying backup...");
-            // Fallback: top anime
-            const r2 = await fetch('https://api.jikan.moe/v4/top/anime?limit=10');
-            const j2 = await r2.json();
-            if (j2.data) renderGrid(j2.data, 'lista');
+        // 1. Traer TODOS los registros de episodios vistos para contar por anime
+        const { data: vistos, error } = await _db
+            .from('episodios_vistos')
+            .select('anime_id');
+
+        if (error) throw error;
+
+        if (!vistos || vistos.length === 0) {
+            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
+            return;
         }
+
+        // 2. Contar vistas por anime_id
+        const conteo = {};
+        vistos.forEach(v => {
+            conteo[v.anime_id] = (conteo[v.anime_id] || 0) + 1;
+        });
+
+        // 3. Ordenar por cantidad de vistas (mayor a menor) y tomar top 10
+        const top10Ids = Object.entries(conteo)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(e => parseInt(e[0]));
+
+        // 4. Obtener metadata en paralelo por lotes (RÁPIDO)
+        const metadataMap = await fetchJikanBatch(top10Ids);
+        const animes = top10Ids
+            .filter(id => metadataMap[id])
+            .map(id => {
+                const data = { ...metadataMap[id] };
+                data._viewCount = conteo[id];
+                return data;
+            });
+
+        if (animes.length > 0) {
+            renderGrid(animes, 'lista');
+        } else {
+            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los animes más vistos.</p>';
+        }
+
     } catch (e) {
         console.error("Error en cargarHome:", e);
-        const lista = document.getElementById('lista');
-        if (lista) {
-            lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
-        }
+        lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
     }
 }
 
@@ -1748,6 +2052,398 @@ async function filtrarPorGenero(id, btn) {
     const r = await fetch(url); const j = await r.json(); renderGrid(j.data, 'lista');
 }
 
+// ===== SISTEMA DE ESTADÍSTICAS DE VISUALIZACIÓN =====
+
+/**
+ * Calcula todas las estadísticas de visualización para un usuario
+ */
+async function calcularEstadisticasVisualizacion(nombreUsuario) {
+    if (!nombreUsuario) return null;
+    
+    try {
+        // 1. Ejecutar todas las consultas en paralelo
+        const [
+            episodiosRes,
+            favoritosRes,
+            comentariosRes,
+            valoracionesRes,
+            perfilRes
+        ] = await Promise.all([
+            _db.from('episodios_vistos').select('id', { count: 'exact', head: true }).eq('usuario_nombre', nombreUsuario),
+            _db.from('favoritos').select('id', { count: 'exact', head: true }).ilike('usuario_nombre', nombreUsuario),
+            _db.from('comentarios').select('id', { count: 'exact', head: true }).eq('usuario', nombreUsuario),
+            _db.from('valoraciones').select('id', { count: 'exact', head: true }).ilike('usuario_nombre', nombreUsuario),
+            _db.from('perfiles').select('racha_dias').ilike('nombre', nombreUsuario).single()
+        ]);
+
+        const totalEpisodios = episodiosRes.count || 0;
+        const totalFavoritos = favoritosRes.count || 0;
+        const totalComentarios = comentariosRes.count || 0;
+        const totalValoraciones = valoracionesRes.count || 0;
+        const rachaDias = perfilRes.data?.racha_dias || 0;
+
+        // 2. Calcular horas estimadas (promedio 24 min por episodio)
+        const minutosTotales = totalEpisodios * 24;
+        const horasEstimadas = Math.floor(minutosTotales / 60);
+        const minutosRestantes = minutosTotales % 60;
+
+        // 3. Calcular animes completados (favoritos que tienen todos los episodios vistos)
+        // Esto es una estimación: asumimos que si tiene el anime en favoritos y al menos
+        // algunos episodios vistos, cuenta como "completado" si el ratio es alto
+        let animesCompletados = 0;
+        try {
+            // Obtenemos los IDs de animes que el usuario tiene en favoritos
+            const { data: favoritosData } = await _db
+                .from('favoritos')
+                .select('anime_id')
+                .ilike('usuario_nombre', nombreUsuario);
+            
+            if (favoritosData && favoritosData.length > 0) {
+                // Para cada favorito, contamos cuántos episodios vio
+                for (const fav of favoritosData) {
+                    const { count: epsVistos } = await _db
+                        .from('episodios_vistos')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('usuario_nombre', nombreUsuario)
+                        .eq('anime_id', fav.anime_id);
+                    
+                    // Si vio al menos 1 episodio de ese anime, lo consideramos "completado"
+                    // (no podemos saber el total de episodios del anime sin llamar a Jikan)
+                    if (epsVistos && epsVistos >= 1) {
+                        animesCompletados++;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("Error calculando animes completados:", e);
+        }
+
+        return {
+            episodios: totalEpisodios,
+            horas: horasEstimadas,
+            minutos: minutosRestantes,
+            horasTexto: `${horasEstimadas}h ${minutosRestantes}m`,
+            animesCompletados: animesCompletados,
+            comentarios: totalComentarios,
+            valoraciones: totalValoraciones,
+            racha: rachaDias,
+            favoritos: totalFavoritos
+        };
+    } catch (err) {
+        console.error("Error en calcularEstadisticasVisualizacion:", err);
+        return null;
+    }
+}
+
+// ===== SISTEMA DE REACCIONES Y RESPUESTAS EN CHAT =====
+
+// Emojis disponibles para reacciones rápidas
+const EMOJIS_REACCION = ["👍", "❤️", "😂", "😮", "😢", "😡", "🔥", "🎉"];
+
+/**
+ * Da o quita una reacción a un mensaje de chat (global o privado)
+ */
+async function toggleReaccionChat(mensajeId, tablaOrigen, emoji) {
+    if (!currentUser) {
+        goldAlert({ title: "INICIA SESIÓN", text: "Debes estar logueado para reaccionar.", icon: "👤" });
+        return null;
+    }
+
+    try {
+        // Verificar si ya existe esa reacción del usuario
+        const { data: existente } = await _db
+            .from('chat_reactions')
+            .select('id')
+            .eq('mensaje_id', mensajeId)
+            .eq('tabla_origen', tablaOrigen)
+            .eq('usuario', currentUser)
+            .eq('emoji', emoji)
+            .maybeSingle();
+
+        if (existente) {
+            // Ya reaccionó con ese emoji → quitarlo
+            await _db.from('chat_reactions').delete().eq('id', existente.id);
+            return { accion: 'removed', emoji };
+        } else {
+            // No tiene esa reacción → agregarla
+            await _db.from('chat_reactions').insert([{
+                mensaje_id: mensajeId,
+                tabla_origen: tablaOrigen,
+                usuario: currentUser,
+                emoji: emoji
+            }]);
+            return { accion: 'added', emoji };
+        }
+    } catch (err) {
+        console.error("Error en toggleReaccionChat:", err);
+        return null;
+    }
+}
+
+/**
+ * Obtiene todas las reacciones agrupadas para un mensaje
+ */
+async function obtenerReaccionesChat(mensajeId, tablaOrigen) {
+    try {
+        const { data } = await _db
+            .from('chat_reactions')
+            .select('emoji, usuario')
+            .eq('mensaje_id', mensajeId)
+            .eq('tabla_origen', tablaOrigen);
+
+        if (!data || data.length === 0) return [];
+
+        // Agrupar por emoji
+        const grupos = {};
+        data.forEach(r => {
+            if (!grupos[r.emoji]) grupos[r.emoji] = [];
+            grupos[r.emoji].push(r.usuario);
+        });
+
+        // Convertir a array de { emoji, count, usuarios, usuarioDioLike }
+        return Object.keys(grupos).map(emoji => ({
+            emoji,
+            count: grupos[emoji].length,
+            usuarios: grupos[emoji],
+            usuarioReacciono: currentUser ? grupos[emoji].some(u => u.toLowerCase() === currentUser.toLowerCase()) : false
+        }));
+    } catch (err) {
+        console.error("Error en obtenerReaccionesChat:", err);
+        return [];
+    }
+}
+
+/**
+ * Renderiza el HTML de las reacciones para un mensaje
+ */
+function renderizarReaccionesChat(reacciones) {
+    if (!reacciones || reacciones.length === 0) return '';
+
+    return `
+        <div class="chat-reactions-bar">
+            ${reacciones.map(r => `
+                <span class="chat-reaction-badge ${r.usuarioReacciono ? 'reaction-active' : ''}" 
+                      onclick="event.stopPropagation(); toggleReaccionChatDesdeUI(${r.mensajeId}, '${r.tablaOrigen}', '${r.emoji}')"
+                      title="${r.usuarios.join(', ')}">
+                    ${r.emoji} <small>${r.count}</small>
+                </span>
+            `).join('')}
+        </div>`;
+}
+
+/**
+ * Muestra el selector de reacciones (popup) al lado del mensaje
+ */
+function mostrarSelectorReacciones(mensajeId, tablaOrigen, btn) {
+    // Cerrar cualquier selector abierto
+    const existente = document.querySelector('.reaction-picker-popup');
+    if (existente) existente.remove();
+
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker-popup';
+    picker.innerHTML = EMOJIS_REACCION.map(e => 
+        `<span class="reaction-option" onclick="event.stopPropagation(); toggleReaccionChatDesdeUI(${mensajeId}, '${tablaOrigen}', '${e}'); this.closest('.reaction-picker-popup').remove();">${e}</span>`
+    ).join('');
+
+    // Posicionar cerca del botón
+    const rect = btn.getBoundingClientRect();
+    picker.style.left = `${Math.max(5, rect.left - 20)}px`;
+    picker.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+    document.body.appendChild(picker);
+
+    // Cerrar al hacer clic fuera
+    setTimeout(() => {
+        document.addEventListener('click', function cerrarPicker(e) {
+            if (!picker.contains(e.target) && e.target !== btn) {
+                picker.remove();
+                document.removeEventListener('click', cerrarPicker);
+            }
+        });
+    }, 100);
+}
+
+/**
+ * Función global para toggle de reacción desde UI
+ */
+window.toggleReaccionChatDesdeUI = async function(mensajeId, tablaOrigen, emoji) {
+    const resultado = await toggleReaccionChat(mensajeId, tablaOrigen, emoji);
+    if (!resultado) return;
+
+    // Recargar las reacciones de ese mensaje
+    const reacciones = await obtenerReaccionesChat(mensajeId, tablaOrigen);
+    const contenedorMsj = document.querySelector(`[data-msg-id="${mensajeId}"][data-msg-table="${tablaOrigen}"]`);
+    if (!contenedorMsj) return;
+
+    const barExistente = contenedorMsj.querySelector('.chat-reactions-bar');
+    const nuevoHtml = renderizarReaccionesChat(reacciones.map(r => ({ ...r, mensajeId, tablaOrigen })));
+    
+    if (barExistente) {
+        barExistente.outerHTML = nuevoHtml;
+    } else {
+        // Insertar después del texto del mensaje
+        const textoDiv = contenedorMsj.querySelector('.chat-text') || contenedorMsj.querySelector('.priv-msg-text');
+        if (textoDiv) {
+            textoDiv.insertAdjacentHTML('afterend', nuevoHtml);
+        }
+    }
+};
+
+/**
+ * Prepara una respuesta a un mensaje (abre el input con la referencia)
+ */
+function responderAMensaje(mensajeId, usuarioOrigen, textoOriginal, inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    // Guardar la referencia de respuesta en un atributo data del input
+    input.dataset.replyTo = JSON.stringify({
+        mensaje_id: mensajeId,
+        usuario: usuarioOrigen,
+        texto: textoOriginal.substring(0, 80) + (textoOriginal.length > 80 ? '...' : '')
+    });
+
+    // Mostrar barra de "respondiendo a" sobre el input area
+    let barra = document.getElementById(`reply-bar-${inputId}`);
+    if (!barra) {
+        barra = document.createElement('div');
+        barra.id = `reply-bar-${inputId}`;
+        barra.className = 'reply-preview-bar';
+        // Insertar ANTES del chat-input-area (el contenedor padre del input)
+        const inputArea = input.closest('.chat-input-area');
+        if (inputArea && inputArea.parentElement) {
+            inputArea.parentElement.insertBefore(barra, inputArea);
+        } else {
+            input.parentElement.insertBefore(barra, input);
+        }
+    }
+    
+    barra.innerHTML = `
+        <div class="reply-preview-content">
+            <span class="reply-preview-icon">↩️</span>
+            <div class="reply-preview-text">
+                <strong>${usuarioOrigen}</strong>: ${textoOriginal.substring(0, 60)}${textoOriginal.length > 60 ? '...' : ''}
+            </div>
+            <button class="reply-cancel-btn" onclick="cancelarRespuesta('${inputId}')">✕</button>
+        </div>
+    `;
+    barra.style.display = 'flex';
+    input.focus();
+}
+
+/**
+ * Cancela la respuesta en curso
+ */
+function cancelarRespuesta(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) delete input.dataset.replyTo;
+    const barra = document.getElementById(`reply-bar-${inputId}`);
+    if (barra) barra.style.display = 'none';
+}
+
+/**
+ * Renderiza el HTML de la respuesta citada dentro de un mensaje
+ */
+function renderizarRespuestaCitada(replyToJson) {
+    if (!replyToJson) return '';
+    return `
+        <div class="reply-quote">
+            <div class="reply-quote-line"></div>
+            <div class="reply-quote-content">
+                <strong>${replyToJson.usuario || 'Usuario'}</strong>
+                <span>${replyToJson.texto || ''}</span>
+            </div>
+        </div>`;
+}
+
+/**
+ * Carga las reacciones de un mensaje en su contenedor
+ */
+async function cargarReaccionesEnMensaje(mensajeId, tablaOrigen) {
+    const reacciones = await obtenerReaccionesChat(mensajeId, tablaOrigen);
+    if (!reacciones || reacciones.length === 0) return;
+    
+    const contenedor = document.getElementById(`reacciones-${mensajeId}-${tablaOrigen}`);
+    if (!contenedor) return;
+    
+    contenedor.innerHTML = renderizarReaccionesChat(reacciones.map(r => ({ ...r, mensajeId, tablaOrigen })));
+}
+
+// ===== SISTEMA DE LIKES EN COMENTARIOS =====
+
+/**
+ * Da o quita un like a un comentario. Retorna el nuevo estado (true=liked, false=unliked).
+ */
+async function toggleLikeComentario(comentarioId) {
+    if (!currentUser) {
+        goldAlert({ title: "INICIA SESIÓN", text: "Debes estar logueado para dar likes.", icon: "👤" });
+        return null;
+    }
+
+    try {
+        // 1. Verificar si ya existe el like
+        const { data: existente } = await _db
+            .from('comentarios_likes')
+            .select('id')
+            .eq('comentario_id', comentarioId)
+            .eq('usuario', currentUser)
+            .maybeSingle();
+
+        if (existente) {
+            // 2. Ya dio like → quitarlo
+            const { error } = await _db
+                .from('comentarios_likes')
+                .delete()
+                .eq('id', existente.id);
+
+            if (error) throw error;
+            return false; // Ya no tiene like
+        } else {
+            // 3. No tiene like → agregarlo
+            const { error } = await _db
+                .from('comentarios_likes')
+                .insert([{
+                    comentario_id: comentarioId,
+                    usuario: currentUser
+                }]);
+
+            if (error) throw error;
+            return true; // Ahora tiene like
+        }
+    } catch (err) {
+        console.error("Error en toggleLikeComentario:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo procesar el like.", icon: "❌" });
+        return null;
+    }
+}
+
+/**
+ * Obtiene el conteo de likes para un comentario y si el usuario actual dio like.
+ */
+async function obtenerEstadoLikes(comentarioId) {
+    try {
+        const { count } = await _db
+            .from('comentarios_likes')
+            .select('*', { count: 'exact', head: true })
+            .eq('comentario_id', comentarioId);
+
+        let usuarioDioLike = false;
+        if (currentUser) {
+            const { data: miLike } = await _db
+                .from('comentarios_likes')
+                .select('id')
+                .eq('comentario_id', comentarioId)
+                .eq('usuario', currentUser)
+                .maybeSingle();
+            usuarioDioLike = !!miLike;
+        }
+
+        return { conteo: count || 0, usuarioDioLike };
+    } catch (err) {
+        console.error("Error en obtenerEstadoLikes:", err);
+        return { conteo: 0, usuarioDioLike: false };
+    }
+}
+
 async function postearComentario() {
     const input = document.getElementById('comment-input');
     const text = input.value.trim(); 
@@ -1871,9 +2567,10 @@ async function cargarComentarios(id) {
 function renderizarComentarios(comentarios, contenedor) {
     const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
     
-    comentarios.forEach(x => { 
+    comentarios.forEach(async (x) => { 
         const d = document.createElement('div'); 
         d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
+        d.id = `comentario-${x.id}`;
         
         // LÓGICA DE ACTUALIZACIÓN AUTOMÁTICA: 
         // Priorizamos el avatar del perfil (perfiles.avatar_id) sobre el guardado en el comentario
@@ -1883,6 +2580,11 @@ function renderizarComentarios(comentarios, contenedor) {
         const esPremium = perfilData?.es_premium || false;
         const av = todosLosAvatares.find(a => a.id === String(avId));
         const urlAvatar = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${x.usuario}`;
+
+        // Obtener estado de likes para este comentario
+        const { conteo, usuarioDioLike } = await obtenerEstadoLikes(x.id);
+        const likeClass = usuarioDioLike ? 'like-btn-active' : 'like-btn-inactive';
+        const likeIcon = usuarioDioLike ? '❤️' : '🤍';
 
         d.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
@@ -1894,6 +2596,16 @@ function renderizarComentarios(comentarios, contenedor) {
                         @${x.usuario} ${esPremium ? '👑' : ''}
                     </strong>
                     <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word;">${parsearMensajeParaStickers(x.comentario)}</span>
+                    
+                    <!-- BOTÓN DE LIKE -->
+                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                        <button onclick="toggleLikeComentarioUI(${x.id})" 
+                                class="like-btn ${likeClass}"
+                                style="background:none; border:none; cursor:pointer; font-size:0.9rem; padding: 2px 4px; border-radius: 6px; transition: 0.2s; display: flex; align-items: center; gap: 4px;">
+                            <span class="like-icon">${likeIcon}</span>
+                            <span class="like-count" style="font-size:0.75rem; color: ${usuarioDioLike ? '#ff4757' : '#888'}; font-weight: bold;">${conteo}</span>
+                        </button>
+                    </div>
                 </div>
                 <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
             </div>`; 
@@ -1905,6 +2617,42 @@ function renderizarComentarios(comentarios, contenedor) {
         contenedor.appendChild(d);
     });
 }
+
+/**
+ * Función global para toggle de like desde UI
+ */
+window.toggleLikeComentarioUI = async function(comentarioId) {
+    const resultado = await toggleLikeComentario(comentarioId);
+    if (resultado === null) return; // Error o sin sesión
+    
+    // Actualizar solo el botón de like sin recargar todos los comentarios
+    const comentarioDiv = document.getElementById(`comentario-${comentarioId}`);
+    if (!comentarioDiv) return;
+    
+    const btn = comentarioDiv.querySelector('.like-btn');
+    const icon = comentarioDiv.querySelector('.like-icon');
+    const count = comentarioDiv.querySelector('.like-count');
+    
+    if (!btn || !icon || !count) return;
+    
+    const nuevoConteo = parseInt(count.innerText) + (resultado ? 1 : -1);
+    
+    if (resultado) {
+        // Dio like
+        icon.innerText = '❤️';
+        count.innerText = nuevoConteo;
+        count.style.color = '#ff4757';
+        btn.classList.remove('like-btn-inactive');
+        btn.classList.add('like-btn-active');
+    } else {
+        // Quitó like
+        icon.innerText = '🤍';
+        count.innerText = nuevoConteo;
+        count.style.color = '#888';
+        btn.classList.remove('like-btn-active');
+        btn.classList.add('like-btn-inactive');
+    }
+};
 
 async function cargarCalendario() {
     const c = document.getElementById('lista-calendario'); 
@@ -1992,7 +2740,7 @@ function renderizarHtmlCalendario(data) {
     if (!c) return;
 
     let html = `<div style="background: rgba(255, 215, 0, 0.1); border: 1px dashed var(--gold); padding: 10px; border-radius: 10px; margin-bottom: 20px; font-size: 0.75rem; text-align: center; color: var(--gold);">
-        🚀 Radar Gold (Anilist) • Horarios en tu <strong>hora local</strong>.
+        🚀 Radar Gold • Horarios en tu <strong>hora local</strong>.
     </div>`;
 
     if (!data || data.length === 0) {
@@ -2284,18 +3032,27 @@ async function aplicarFiltrosAvanzados(pagina = 1) {
     if (status) url += `&status=${status}`;
 
     try {
-        const r = await fetch(url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const r = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!r.ok) throw new Error(`Error HTTP ${r.status}: La API de filtros no respondió.`);
+
         const j = await r.json();
 
         if (j.data && j.data.length > 0) {
             renderGrid(j.data, 'lista-todos');
             renderPaginacionFiltros(j.pagination);
         } else {
-            listaTodos.innerHTML = `
-                <div style="text-align:center; padding:40px; width:100%;">
-                    <p style="opacity:0.5; color:#888;">No se detectaron animes en este cuadrante del radar.</p>
-                    <button onclick="location.reload()" class="btn-random-gold" style="margin-top:20px;">RESETEAR RADAR</button>
-                </div>`;
+            if (listaTodos) {
+                listaTodos.innerHTML = `
+                    <div style="text-align:center; padding:40px; width:100%;">
+                        <p style="opacity:0.5; color:#888;">No se detectaron animes con esos filtros.</p>
+                        <button onclick="aplicarFiltrosAvanzados(1)" class="btn-random-gold" style="margin-top:20px;">🔄 REINTENTAR</button>
+                    </div>`;
+            }
         }
 
         const pBusquedaExistente = document.getElementById('paginacion-busqueda');
@@ -2304,9 +3061,23 @@ async function aplicarFiltrosAvanzados(pagina = 1) {
         if (pNormalExistente) pNormalExistente.style.display = 'none';
     } catch (e) {
         console.error("Error al filtrar:", e);
+        
+        const errorMsg = e.name === 'AbortError' 
+            ? 'La conexión con la biblioteca tardó demasiado. Verifica tu internet.'
+            : e.message || 'No pudimos conectar con la biblioteca central.';
+        
+        if (listaTodos) {
+            listaTodos.innerHTML = `
+                <div style="width:100%; text-align:center; padding:40px 20px;">
+                    <div style="font-size:2.5rem; margin-bottom:15px;">⚠️</div>
+                    <p style="color:#ff6b6b; font-size:0.85rem; margin-bottom:15px;">${errorMsg}</p>
+                    <button onclick="aplicarFiltrosAvanzados(1)" class="btn-random-gold" style="margin:5px;">🔄 REINTENTAR</button>
+                </div>`;
+        }
+        
         goldAlert({
             title: "FALLO EN EL RADAR",
-            text: "No pudimos conectar con la biblioteca central.",
+            text: errorMsg,
             icon: "❌"
         });
     }
@@ -2937,16 +3708,30 @@ async function cargarTodosLosAnimes(page) {
     }
 
     try {
-        const r = await fetch(`https://api.jikan.moe/v4/anime?page=${page}&limit=24&order_by=popularity&sort=asc`);
-        const j = await r.json();
+        // Intentar Jikan primero, si falla usar Anilist como respaldo automático
+        const result = await fetchWithFallback(
+            `https://api.jikan.moe/v4/anime?page=${page}&limit=24&order_by=popularity&sort=asc`,
+            () => listAnilist(page, 24)
+        );
 
-        if (j.data) {
-            renderGrid(j.data, 'lista-todos'); 
+        if (!result.ok) {
+            throw new Error(result.error || "No se pudieron cargar los animes.");
+        }
+
+        const data = result.data;
+        
+        if (data && data.length > 0) {
+            renderGrid(data, 'lista-todos'); 
             
             paginaActualTodos = page;
-            if (labelPagina) labelPagina.innerText = `Página ${page}`;
+            if (labelPagina) {
+                if (result.source === 'anilist') {
+                    labelPagina.innerHTML = `Página ${page} <span style="font-size:0.6rem; opacity:0.5;"></span>`;
+                } else {
+                    labelPagina.innerText = `Página ${page}`;
+                }
+            }
             
-            // Control visual de botones
             const btnPrev = document.getElementById('btn-prev-all');
             const btnNext = document.getElementById('btn-next-all');
 
@@ -2955,19 +3740,36 @@ async function cargarTodosLosAnimes(page) {
                 btnPrev.style.pointerEvents = page === 1 ? "none" : "auto";
             }
             if (btnNext) {
-                const hasNext = j.pagination && j.pagination.has_next_page;
+                // En Anilist no tenemos paginación exacta, asumimos que siempre hay más si hay datos
+                const hasNext = result.source === 'jikan' ? 
+                    (result.pagination && result.pagination.has_next_page) : 
+                    (data.length >= 24);
                 btnNext.style.opacity = hasNext ? "1" : "0.3";
                 btnNext.style.pointerEvents = hasNext ? "auto" : "none";
             }
 
-            // Mostrar el contenedor solo si hay más de una página
             if (paginacion) {
-                const totalPages = j.pagination ? j.pagination.last_visible_page : 1;
-                paginacion.style.display = (totalPages > 1) ? "flex" : "none";
+                paginacion.style.display = data.length >= 24 ? "flex" : "none";
             }
+        } else {
+            throw new Error("No se encontraron animes.");
         }
     } catch (err) {
         console.error("Error cargando biblioteca:", err);
+        
+        if (contenedor) {
+            const errorMsg = err.name === 'AbortError' 
+                ? 'La conexión con la biblioteca tardó demasiado. Verifica tu internet.'
+                : err.message || 'Error al conectar con la biblioteca de animes.';
+            
+            contenedor.innerHTML = `
+                <div style="width:100%; text-align:center; padding:40px 20px;">
+                    <div style="font-size:2.5rem; margin-bottom:15px;">⚠️</div>
+                    <p style="color:#ff6b6b; font-size:0.85rem; margin-bottom:15px;">${errorMsg}</p>
+                    <button onclick="cargarTodosLosAnimes(${page})" class="btn-random-gold" style="margin:5px;">🔄 REINTENTAR</button>
+                    <button onclick="cargarTodosLosAnimes(1)" class="btn-random-gold" style="margin:5px; border-color:#888; color:#888;">🏠 VOLVER AL INICIO</button>
+                </div>`;
+        }
     }
 }
 
@@ -3249,7 +4051,67 @@ async function guardarLinkEpisodio() {
 /**
  * Envía una invitación a otro usuario para ver el anime actual
  */
+async function abrirPromptInvitacionWP() {
+    return goldAlert({ title: "DESACTIVADO", text: "La función Watch Party se encuentra temporalmente inactiva por mantenimiento.", icon: "🚧" });
+    
+    /* CÓDIGO ORIGINAL INACTIVO
+    if (!currentAnime) {
+        return goldAlert({ title: "ERROR", text: "No hay un anime cargado.", icon: "❌" });
+    }
+    const invitado = prompt("Ingresa el nombre del usuario al que deseas invitar:");
+    if (!invitado) return;
+
+    const epNum = prompt(`¿Para qué episodio quieres invitar a ${invitado}?`, "1") || "1";
+    
+    const msg = `[WP_INVITE:${currentAnime.mal_id}:${epNum}:${currentUser}]`;
+    
+    try {
+        const { error } = await _db.from('chat_privado').insert([
+            { emisor: String(currentUser).trim(), receptor: String(invitado).trim(), mensaje: msg }
+        ]);
+        if (error) throw error;
+        
+        goldAlert({ title: "INVITACIÓN ENVIADA", text: "Revisa tu chat privado.", icon: "📩" });
+    } catch(e) {
+        console.error(e);
+        goldAlert({title:"ERROR", text: "No se pudo enviar la invitación."});
+    }
+    */
+}
+
+async function unirseAWatchPartyDesdeChat(animeId, epNum, hostName) {
+    if (typeof cerrarChatPrivado === 'function') cerrarChatPrivado();
+    
+    // Obtenemos los datos del anime si no lo tenemos abierto
+    let animeData = null;
+    if (currentAnime && currentAnime.mal_id == animeId) {
+        animeData = currentAnime;
+    } else {
+        try {
+            const res = await fetch(`https://api.jikan.moe/v4/anime/${animeId}`);
+            const data = await res.json();
+            animeData = data.data;
+        } catch(e) {
+            console.error(e);
+            return goldAlert({title: "Error", text: "No se pudo cargar la información del anime."});
+        }
+    }
+    
+    const partyData = {
+        host_name: hostName.trim(),
+        guest_name: currentUser.trim(),
+        anime_id: parseInt(animeId),
+        ep_num: parseInt(epNum),
+        anime_data: animeData
+    };
+
+    unirseAWatchParty(partyData);
+}
+
 async function invitarAVer(usuarioInvitado) {
+    return goldAlert({ title: "DESACTIVADO", text: "La función Watch Party se encuentra temporalmente inactiva por mantenimiento.", icon: "🚧" });
+
+    /* CÓDIGO ORIGINAL INACTIVO
     if (!currentAnime) {
         return goldAlert({ 
             title: "PASO PREVIO", 
@@ -3260,60 +4122,57 @@ async function invitarAVer(usuarioInvitado) {
 
     const epNum = prompt(`¿En qué episodio quieres que se unan?`, "1") || "1";
 
-    const { error } = await _db.from('watch_parties').insert([{
+    const partyData = {
         host_name: currentUser.trim(),
         guest_name: usuarioInvitado.trim(),
         anime_id: currentAnime.mal_id,
         ep_num: parseInt(epNum),
-        anime_data: currentAnime, 
-        status: 'pending'
-    }]);
-
-    if (!error) {
-        await goldAlert({ 
-            title: "INVITACIÓN ENVIADA", 
-            text: `Esperando a que @${usuarioInvitado} acepte...`, 
-            icon: "📩" 
+        anime_data: currentAnime
+    };
+    
+    // Mandamos el paquete directo al canal dedicado del invitado
+    try {
+        const canalInvitado = _db.channel(`usuario-${usuarioInvitado.trim()}`);
+        canalInvitado.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                canalInvitado.send({
+                    type: 'broadcast',
+                    event: 'wp-invite',
+                    payload: partyData
+                });
+                console.log("📨 Invitación P2P enviada a", usuarioInvitado);
+            }
         });
-
-        // --- NUEVO: Mandamos también al Anfitrión al cine ---
-        unirseAWatchParty({
-            host_name: currentUser,
-            anime_id: currentAnime.mal_id,
-            ep_num: parseInt(epNum)
-        });
-    } else {
-        console.error("🚨 Error Supabase al invitar:", error);
-        goldAlert({
-            title: "ERROR AL ENVIAR",
-            text: "No se pudo conectar con el servidor de invitaciones.",
-            icon: "❌"
-        });
+    } catch (e) {
+        console.error("Error enviando invitación P2P", e);
     }
+
+    await goldAlert({ 
+        title: "INVITACIÓN ENVIADA", 
+        text: `Esperando a que @${usuarioInvitado} acepte...`, 
+        icon: "📩" 
+    });
+
+    // Mandamos al Anfitrión a su propia sala
+    unirseAWatchParty(partyData);
+    */
 }
 
-/**
- * Escucha en tiempo real si alguien invita al usuario actual
- */
-function escucharInvitacionesWatchParty() {
+function iniciarCanalDedicadoUsuario() {
+    // DESACTIVADO: La función Watch Party P2P no está activa
+    return;
+    
+    /* CÓDIGO ORIGINAL INACTIVO
     if (!currentUser) return;
 
-    console.log("🚀 Iniciando Radar WatchParty para:", currentUser);
+    console.log("🚀 Iniciando Canal Dedicado para:", currentUser);
 
-    // Usamos un canal global para evitar errores de sintaxis en el nombre del canal
-    const channel = _db.channel('watch-party-global')
-    .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'watch_parties'
-        // Eliminamos el filtro de servidor para máxima compatibilidad
-    }, async (payload) => {
-        const party = payload.new;
-        
-        // Filtramos manualmente en el cliente (Inmune a errores de comillas o espacios)
-        if (String(party.guest_name).trim() !== String(currentUser).trim()) return;
+    const manejarInvitacion = async (party) => {
+        if (window.wpUltimaInvitacion === party.host_name + party.anime_id) return;
+        window.wpUltimaInvitacion = party.host_name + party.anime_id;
+        setTimeout(() => window.wpUltimaInvitacion = null, 10000);
 
-        console.log("🍿 ¡Invitación detectada para ti!", party);
+        console.log("🍿 ¡Invitación P2P recibida!", party);
         reproducirSonidoAnime();
 
         const aceptar = await goldAlert({
@@ -3327,11 +4186,18 @@ function escucharInvitacionesWatchParty() {
         if (aceptar) {
             unirseAWatchParty(party);
         }
-    })
-    
-    channel.subscribe((status) => {
-        console.log(`📡 Radar WatchParty (${currentUser}):`, status);
+    };
+
+    // Canal único por usuario
+    window.miCanalDedicado = _db.channel(`usuario-${currentUser.trim()}`)
+    .on('broadcast', { event: 'wp-invite' }, (payload) => {
+        manejarInvitacion(payload.payload);
     });
+    
+    window.miCanalDedicado.subscribe((status) => {
+        console.log(`📡 Canal Dedicado (${currentUser}):`, status);
+    });
+    */
 }
 
 /**
@@ -3375,7 +4241,7 @@ async function unirseAWatchParty(party) {
     }
 }
 
-// ===== WATCH PARTY MEJORADO CON SINCRONIZACIÓN =====
+// ===== WATCH PARTY MEJORADO CON SINCRONIZACIÓN Y VOZ =====
 let wpRoomId = null;
 let wpEsHost = false;
 let wpAnimeActual = null;
@@ -3386,6 +4252,16 @@ let wpSyncInterval = null;
 let wpUltimoSync = { playing: false, time: 0 };
 let wpIgnorarSync = false; // Evita loops de sincronización
 
+// Variables WebRTC (Voz)
+let wpPeerConnection = null;
+let wpLocalStream = null;
+let wpRemoteAudio = null;
+let wpVoiceActive = false;
+
+const webrtcConfig = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+};
+
 /**
  * Abre el modal de Watch Party y configura el canal de sincronización
  */
@@ -3394,23 +4270,34 @@ function wpAbrirModal(esHost, anime, ep, amigo) {
     wpAnimeActual = anime;
     wpEpActual = ep || 1;
     
-    const modal = document.getElementById('wp-modal');
+    // Entrar en pantalla completa automáticamente si no lo estamos
+    const videoContainer = document.querySelector('.video-clipper');
+    if (videoContainer && !document.fullscreenElement) {
+        try {
+            if (videoContainer.requestFullscreen) videoContainer.requestFullscreen();
+            else if (videoContainer.webkitRequestFullscreen) videoContainer.webkitRequestFullscreen();
+        } catch(e) { console.log("Fullscreen auto bloqueado", e); }
+    }
+
+    const modal = document.getElementById('wp-floating-container');
     const titleEl = document.getElementById('wp-anime-title');
     const roleEl = document.getElementById('wp-role-label');
     const epEl = document.getElementById('wp-ep-label');
     const statusEl = document.getElementById('wp-status-indicator');
     const syncStatusEl = document.getElementById('wp-sync-status');
     
-    titleEl.innerText = anime?.title || "Anime";
-    roleEl.innerText = esHost ? '👑 Host' : '🎮 Invitado';
-    epEl.innerText = `Episodio ${wpEpActual}`;
-    statusEl.className = 'wp-status-live';
-    statusEl.innerText = '📡 EN VIVO';
-    syncStatusEl.innerText = '🔗 Sincronizado';
+    if (titleEl) titleEl.innerText = anime?.title || "Anime";
+    if (roleEl) roleEl.innerText = esHost ? '👑 Host' : '🎮 Invitado';
+    if (epEl) epEl.innerText = `Episodio ${wpEpActual}`;
+    if (statusEl) {
+        statusEl.className = 'wp-status-live';
+        statusEl.innerText = '📡 EN VIVO';
+    }
+    if (syncStatusEl) syncStatusEl.innerText = '🔗 Sincronizado';
     
     // Limpiar chat
     const chatArea = document.getElementById('wp-msg-list');
-    chatArea.innerHTML = `<div class="wp-msg-item" style="opacity:0.6; text-align:center;">--- Watch Party Iniciada ---</div>`;
+    if (chatArea) chatArea.innerHTML = `<div class="wp-msg-item" style="opacity:0.6; text-align:center; margin-top:5px; font-size:0.8rem;">--- Watch Party Iniciada ---</div>`;
     
     // Generar room ID
     const miUser = currentUser.trim();
@@ -3429,17 +4316,193 @@ function wpAbrirModal(esHost, anime, ep, amigo) {
     .on('broadcast', { event: 'sync' }, (payload) => {
         wpRecibirSync(payload.payload);
     })
+    .on('broadcast', { event: 'webrtc' }, async (payload) => {
+        await wpManejarSenalWebRTC(payload.payload);
+    })
     .subscribe((status) => {
         console.log(`📡 WP Canal (${wpRoomId}):`, status);
     });
     
-    modal.style.display = 'flex';
+    if (modal) modal.style.display = 'flex';
     
     // Si es host, iniciar envío periódico de sync
     if (esHost) {
         wpIniciarSyncHost();
     }
+    
+    // Preparar el elemento de audio remoto si no existe
+    if (!wpRemoteAudio) {
+        wpRemoteAudio = document.createElement('audio');
+        wpRemoteAudio.autoplay = true;
+        document.body.appendChild(wpRemoteAudio);
+    }
+    
+    // Configurar arrastrar (drag) para el modal
+    wpConfigurarDrag();
 }
+
+/**
+ * Permite arrastrar el chat flotante
+ */
+function wpConfigurarDrag() {
+    const card = document.getElementById('wp-modal');
+    const header = document.getElementById('wp-drag-handle');
+    if (!card || !header) return;
+
+    let isDragging = false, currentX, currentY, initialX, initialY, xOffset = 0, yOffset = 0;
+
+    header.onmousedown = dragStart;
+    document.onmouseup = dragEnd;
+    document.onmousemove = drag;
+
+    function dragStart(e) {
+        initialX = e.clientX - xOffset;
+        initialY = e.clientY - yOffset;
+        if (e.target === header || header.contains(e.target)) {
+            isDragging = true;
+        }
+    }
+    function dragEnd(e) {
+        initialX = currentX;
+        initialY = currentY;
+        isDragging = false;
+    }
+    function drag(e) {
+        if (isDragging) {
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            xOffset = currentX;
+            yOffset = currentY;
+            card.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+        }
+    }
+}
+
+/**
+ * Ocultar/Mostrar el chat flotante
+ */
+function wpToggleChat() {
+    const card = document.getElementById('wp-modal');
+    const btn = document.getElementById('wp-toggle-btn');
+    if (!card) return;
+    
+    if (card.style.display === 'none') {
+        card.style.display = 'flex';
+        btn.innerText = '💬 Ocultar Chat';
+    } else {
+        card.style.display = 'none';
+        btn.innerText = '💬 Mostrar Chat';
+    }
+}
+
+// ==== WEBRTC VOZ LOGICA ====
+
+async function toggleWpVoice() {
+    const btn = document.getElementById('wp-voice-btn');
+    if (wpVoiceActive) {
+        // Desconectar
+        wpVoiceActive = false;
+        if (wpLocalStream) {
+            wpLocalStream.getTracks().forEach(track => track.stop());
+            wpLocalStream = null;
+        }
+        if (wpPeerConnection) {
+            wpPeerConnection.close();
+            wpPeerConnection = null;
+        }
+        btn.innerText = '🎤 Unirse a Voz';
+        btn.style.background = 'var(--gold)';
+    } else {
+        // Conectar
+        try {
+            wpLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            wpVoiceActive = true;
+            btn.innerText = '🔇 Salir de Voz';
+            btn.style.background = '#ff4444';
+            
+            // Iniciar llamada (el Host generalmente inicia, pero cualquiera puede)
+            wpIniciarWebRTC();
+        } catch (e) {
+            console.error('Error accediendo al micrófono:', e);
+            alert('No se pudo acceder al micrófono. Asegúrate de dar los permisos.');
+        }
+    }
+}
+
+function wpCrearPeerConnection() {
+    wpPeerConnection = new RTCPeerConnection(webrtcConfig);
+    
+    // Agregar tracks locales
+    if (wpLocalStream) {
+        wpLocalStream.getTracks().forEach(track => {
+            wpPeerConnection.addTrack(track, wpLocalStream);
+        });
+    }
+
+    // Escuchar tracks remotos
+    wpPeerConnection.ontrack = (event) => {
+        if (wpRemoteAudio) {
+            wpRemoteAudio.srcObject = event.streams[0];
+        }
+    };
+
+    // ICE Candidates
+    wpPeerConnection.onicecandidate = (event) => {
+        if (event.candidate && wpChatChannel) {
+            wpChatChannel.send({
+                type: 'broadcast',
+                event: 'webrtc',
+                payload: { type: 'ice', candidate: event.candidate, sender: currentUser }
+            });
+        }
+    };
+    
+    return wpPeerConnection;
+}
+
+async function wpIniciarWebRTC() {
+    const pc = wpCrearPeerConnection();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    
+    wpChatChannel.send({
+        type: 'broadcast',
+        event: 'webrtc',
+        payload: { type: 'offer', offer: offer, sender: currentUser }
+    });
+}
+
+async function wpManejarSenalWebRTC(payload) {
+    if (payload.sender === currentUser) return; // Ignorar nuestros propios mensajes
+    if (!wpVoiceActive) return; // Si no estamos en voz, ignorar
+    
+    try {
+        if (payload.type === 'offer') {
+            const pc = wpPeerConnection || wpCrearPeerConnection();
+            await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            
+            wpChatChannel.send({
+                type: 'broadcast',
+                event: 'webrtc',
+                payload: { type: 'answer', answer: answer, sender: currentUser }
+            });
+        } else if (payload.type === 'answer') {
+            if (wpPeerConnection) {
+                await wpPeerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+            }
+        } else if (payload.type === 'ice') {
+            if (wpPeerConnection) {
+                await wpPeerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            }
+        }
+    } catch (e) {
+        console.error("Error WebRTC signaling:", e);
+    }
+}
+
 
 /**
  * Inicia el envío periódico de estado de reproducción (solo Host)
@@ -3645,8 +4708,8 @@ function recibirMsgWatchParty(data) {
  * Cierra y limpia el Watch Party
  */
 function salirWatchParty() {
-    const modal = document.getElementById('wp-modal');
-    modal.style.display = 'none';
+    const modal = document.getElementById('wp-floating-container');
+    if (modal) modal.style.display = 'none';
     
     // Limpiar canal
     if (wpChatChannel) {
@@ -3658,6 +4721,15 @@ function salirWatchParty() {
     if (wpSyncInterval) {
         clearInterval(wpSyncInterval);
         wpSyncInterval = null;
+    }
+    
+    // Limpiar WebRTC
+    if (wpVoiceActive) {
+        toggleWpVoice(); // Esto limpiará los streams y la conexión
+    }
+    if (wpRemoteAudio) {
+        wpRemoteAudio.remove();
+        wpRemoteAudio = null;
     }
     
     wpRoomId = null;
@@ -3748,10 +4820,27 @@ async function enviarMensajeChat() {
     // Si no hay texto o no hay usuario logueado, no hace nada
     if(!texto || !currentUser) return; 
 
-    const { error } = await _db.from('chat_global').insert([{ 
-        usuario: currentUser, // Este nombre debe existir en la tabla 'perfiles'
+    // Verificar si hay una respuesta pendiente
+    let replyToJson = null;
+    if (input.dataset.replyTo) {
+        try {
+            replyToJson = JSON.parse(input.dataset.replyTo);
+        } catch(e) {}
+        // Limpiar la respuesta
+        delete input.dataset.replyTo;
+        const barra = document.getElementById('reply-bar-chat-input');
+        if (barra) barra.style.display = 'none';
+    }
+
+    const mensajeData = { 
+        usuario: currentUser,
         mensaje: texto 
-    }]);
+    };
+    if (replyToJson) {
+        mensajeData.reply_to_json = replyToJson;
+    }
+
+    const { error } = await _db.from('chat_global').insert([mensajeData]);
 
     if (error) {
         console.error("Error al enviar:", error.message);
@@ -3762,145 +4851,161 @@ async function enviarMensajeChat() {
     }
 }
 
+// Variable para controlar el último ID de mensaje cargado
+let ultimoIdMensajeChat = 0;
+
 async function cargarMensajesChat() {
     const container = document.getElementById('chat-messages');
     if (!container) return;
 
-    // --- CAMBIO: 2 DÍAS DE MENSAJES (48 HORAS) ---
     const tiempoLimite = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    // Priorizamos el tiempo guardado en el perfil para que no se pierda al desloguear
     const perfilLocal = JSON.parse(localStorage.getItem('aidume_profile'));
     const ultimaVezLeido = perfilLocal?.ultimo_visto_chat || localStorage.getItem('last_chat_read') || tiempoLimite;
     const chatAbierto = document.getElementById('chat-window').style.display === 'flex';
 
-    const { data: mensajes, error } = await _db
+    // Solo traer mensajes NUEVOS (mayores al último ID que tenemos)
+    let query = _db
         .from('chat_global')
         .select(`
-            id, usuario, mensaje, fecha,
+            id, usuario, mensaje, fecha, reply_to_json,
             perfiles (avatar_id, es_premium, tema_chat, racha_dias, online, ultima_conexion)
-        `) // --- NUEVO: Traemos el estado premium desde perfiles ---
+        `)
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
+
+    // Si ya tenemos mensajes cargados, solo traemos los nuevos
+    if (ultimoIdMensajeChat > 0) {
+        query = query.gt('id', ultimoIdMensajeChat);
+    }
+
+    const { data: mensajes, error } = await query;
 
     if (error) {
         console.error("Error Chat:", error.message);
         return;
     }
 
-    if (mensajes) {
-        let nuevosCount = 0;
-        let mencionDetectada = false;
+    if (!mensajes || mensajes.length === 0) return;
 
-        container.innerHTML = mensajes.map(m => {
-            const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
-            // Datos del perfil y sistema de avatares
-            const perfilData = Array.isArray(m.perfiles) ? m.perfiles[0] : m.perfiles;
-            const esPremium = perfilData?.es_premium;
-            const avId = perfilData?.avatar_id || '1';
-            const avData = todosLosAvatares.find(a => a.id === String(avId)) || AVATARES_RANGOS[0];
+    // Si es la primera carga (no hay mensajes en el DOM), hacemos carga completa
+    const esCargaInicial = (ultimoIdMensajeChat === 0);
+    
+    if (esCargaInicial) {
+        container.innerHTML = "";
+    }
 
-            // --- LÓGICA ONLINE/OFFLINE (DOBLE CHECK DE SEGURIDAD) ---
-            let esOnlineDoble = false;
-            if (perfilData?.ultima_conexion) {
-                // --- PARSEO ROBUSTO DE FECHA DESDE SUPABASE ---
-                let isoStringChat = perfilData.ultima_conexion.trim().replace(" ", "T");
-                if (!isoStringChat.endsWith('Z') && !isoStringChat.includes('+') && !isoStringChat.includes('-')) {
-                    isoStringChat += 'Z';
-                }
-                const fechaObjChat = new Date(isoStringChat);
-                const latidoMs = Math.abs(Date.now() - fechaObjChat.getTime());
+    let nuevosCount = 0;
+    let mencionDetectada = false;
+    let htmlNuevos = "";
 
-                // --- DEBUGGING DE FECHAS EN CHAT (VER EN CONSOLA DEL NAVEGADOR) ---
-                console.log(`DEBUG CHAT: Usuario: ${m.usuario}`);
-                console.log(`DEBUG CHAT: Raw DB string: ${perfilData.ultima_conexion}`);
-                console.log(`DEBUG CHAT: Parsed ISO string: ${isoStringChat}`);
-                console.log(`DEBUG CHAT: fechaObjChat (Date object): ${fechaObjChat}`);
-                console.log(`DEBUG CHAT: fechaObjChat.toLocaleString() (Local): ${fechaObjChat.toLocaleString()}`);
+    mensajes.forEach(m => {
+        // Actualizar el último ID
+        if (m.id > ultimoIdMensajeChat) ultimoIdMensajeChat = m.id;
 
-                // Sincronizamos el margen también en el chat (5 minutos)
-                esOnlineDoble = (perfilData?.online === true && latidoMs < 300000);
+        // Si el mensaje ya existe en el DOM, lo saltamos
+        if (!esCargaInicial && document.querySelector(`[data-msg-id="${m.id}"]`)) return;
+
+        const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+        const perfilData = Array.isArray(m.perfiles) ? m.perfiles[0] : m.perfiles;
+        const esPremium = perfilData?.es_premium;
+        const avId = perfilData?.avatar_id || '1';
+        const avData = todosLosAvatares.find(a => a.id === String(avId)) || AVATARES_RANGOS[0];
+
+        let esOnlineDoble = false;
+        if (perfilData?.ultima_conexion) {
+            let isoStringChat = perfilData.ultima_conexion.trim().replace(" ", "T");
+            if (!isoStringChat.endsWith('Z') && !isoStringChat.includes('+') && !isoStringChat.includes('-')) {
+                isoStringChat += 'Z';
             }
-            
-            const esOnline = esOnlineDoble;
-            
-            // Lógica de mensajes nuevos y menciones
-            if (m.fecha > ultimaVezLeido) nuevosCount++;
-            
-            let textoMsj = parsearMensajeParaStickers(m.mensaje);
-            const regexMencion = new RegExp(`@${currentUser}`, 'i');
-            const soyYoArrobado = currentUser && regexMencion.test(m.mensaje);
-            
-            if (soyYoArrobado) {
-                textoMsj = m.mensaje.replace(regexMencion, `<span class="chat-mention-me">$&</span>`);
-                if (m.fecha > ultimaVezLeido) mencionDetectada = true;
-            }
+            const fechaObjChat = new Date(isoStringChat);
+            const latidoMs = Math.abs(Date.now() - fechaObjChat.getTime());
+            esOnlineDoble = (perfilData?.online === true && latidoMs < 300000);
+        }
+        const esOnline = esOnlineDoble;
 
-            // --- LÓGICA DE TEMAS (SKINS) ---
-            const temaClase = perfilData?.tema_chat ? `msg-skin-${perfilData.tema_chat}` : '';
+        if (m.fecha > ultimaVezLeido) nuevosCount++;
 
-            // --- LÓGICA VISUAL PREMIUM ---
-            // Si es premium, aplicamos borde dorado, fondo especial y posición relativa para la corona
-            const estiloPremium = esPremium 
-                ? 'border: 1.5px solid var(--gold); background: rgba(255, 215, 0, 0.12); position: relative; box-shadow: inset 0 0 10px rgba(255,215,0,0.1);' 
-                : '';
-            
-            // Coronita en la esquina inferior derecha para Premium
-            const coronaPremium = esPremium 
-                ? '<span style="position:absolute; bottom:4px; right:8px; font-size:0.7rem; filter:drop-shadow(0 0 3px gold);">👑</span>' 
-                : '';
+        let textoMsj = parsearMensajeParaStickers(m.mensaje);
+        const regexMencion = new RegExp(`@${currentUser}`, 'i');
+        const soyYoArrobado = currentUser && regexMencion.test(m.mensaje);
 
-            return `
-            <div class="chat-msg-row">
+        if (soyYoArrobado) {
+            textoMsj = m.mensaje.replace(regexMencion, `<span class="chat-mention-me">$&</span>`);
+            if (m.fecha > ultimaVezLeido) mencionDetectada = true;
+        }
+
+        const temaClase = perfilData?.tema_chat ? `msg-skin-${perfilData.tema_chat}` : '';
+        const estiloPremium = esPremium 
+            ? 'border: 1.5px solid var(--gold); background: rgba(255, 215, 0, 0.12); position: relative; box-shadow: inset 0 0 10px rgba(255,215,0,0.1);' 
+            : '';
+        const coronaPremium = esPremium 
+            ? '<span style="position:absolute; bottom:4px; right:8px; font-size:0.7rem; filter:drop-shadow(0 0 3px gold);">👑</span>' 
+            : '';
+
+        const replyHtml = renderizarRespuestaCitada(m.reply_to_json);
+        const accionesHtml = `
+            <div class="chat-msg-actions">
+                <button class="chat-action-btn" onclick="mostrarSelectorReacciones(${m.id}, 'chat_global', this)" title="Reaccionar">😊</button>
+                <button class="chat-action-btn" onclick="responderAMensaje(${m.id}, '${m.usuario}', '${m.mensaje.replace(/'/g, "\\'").replace(/"/g, '"')}', 'chat-input')" title="Responder">↩️</button>
+            </div>`;
+
+        const msgHtml = `
+            <div class="chat-msg-row" data-msg-id="${m.id}" data-msg-table="chat_global">
                 <div style="position: relative; flex-shrink: 0;">
                     <img src="${avData.img}" class="chat-avatar-mini" 
                          onclick="verPerfilAjeno('${m.usuario}')" 
                          style="cursor:pointer;">
                     <span class="${esOnline ? 'online-dot' : 'offline-dot'}" style="position: absolute; top: -2px; right: -2px; border: 2px solid #111; margin: 0; box-sizing: content-box;"></span>
                 </div>
-                
                 <div class="chat-msg-body ${temaClase}" style="${estiloPremium}">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <strong class="chat-user-name" 
-                                onclick="verPerfilAjeno('${m.usuario}')" 
-                                style="cursor:pointer; text-decoration:underline;">
-                            @${m.usuario}
-                        </strong>
+                        <strong class="chat-user-name" onclick="verPerfilAjeno('${m.usuario}')" style="cursor:pointer; text-decoration:underline;">@${m.usuario}</strong>
                         ${obtenerHtmlRacha(perfilData?.racha_dias)}
                         <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat">🚩</button>
                     </div>
-                    
-                    <div class="chat-text" style="color:${esPremium ? 'var(--gold)' : 'white'}; font-size:0.9rem; font-weight:${esPremium ? 'bold' : 'normal'};">
-                        ${textoMsj}
-                    </div>
-
+                    ${replyHtml}
+                    <div class="chat-text" style="color:${esPremium ? 'var(--gold)' : 'white'}; font-size:0.9rem; font-weight:${esPremium ? 'bold' : 'normal'};">${textoMsj}</div>
                     ${coronaPremium}
+                    <div class="chat-reactions-container" id="reacciones-${m.id}-chat_global"></div>
+                    ${accionesHtml}
                 </div>
             </div>`;
-        }).join('');
-        
-        if (chatAbierto) {
-            container.scrollTop = container.scrollHeight;
-            const ahora = new Date().toISOString();
-            localStorage.setItem('last_chat_read', ahora);
-            
-            const p = JSON.parse(localStorage.getItem('aidume_profile'));
-            if(p && p.ultimo_visto_chat !== ahora) {
-                p.ultimo_visto_chat = ahora;
-                localStorage.setItem('aidume_profile', JSON.stringify(p));
-            }
-        } else if (nuevosCount > 0) {
-            // Actualizamos el contador en la burbuja si el chat está cerrado
-            const badge = document.getElementById('chat-badge');
-            if (badge) {
-                badge.innerText = nuevosCount > 99 ? "+99" : nuevosCount;
-                badge.style.display = "block";
-            }
-            
-            if (mencionDetectada) {
-                // --- SONIDO DE MENCIÓN ---
-                reproducirSonidoChat();
-                lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
-            }
+
+        if (esCargaInicial) {
+            htmlNuevos += msgHtml;
+        } else {
+            // Insertar al final del contenedor
+            container.insertAdjacentHTML('beforeend', msgHtml);
+            // Cargar reacciones para este mensaje nuevo
+            cargarReaccionesEnMensaje(m.id, 'chat_global');
+        }
+    });
+
+    // Si es carga inicial, insertamos todo de una
+    if (esCargaInicial && htmlNuevos) {
+        container.innerHTML = htmlNuevos;
+        // Cargar reacciones para todos los mensajes
+        mensajes.forEach(m => cargarReaccionesEnMensaje(m.id, 'chat_global'));
+    }
+
+    if (chatAbierto) {
+        container.scrollTop = container.scrollHeight;
+        const ahora = new Date().toISOString();
+        localStorage.setItem('last_chat_read', ahora);
+        const p = JSON.parse(localStorage.getItem('aidume_profile'));
+        if (p && p.ultimo_visto_chat !== ahora) {
+            p.ultimo_visto_chat = ahora;
+            localStorage.setItem('aidume_profile', JSON.stringify(p));
+        }
+    } else if (nuevosCount > 0) {
+        const badge = document.getElementById('chat-badge');
+        if (badge) {
+            badge.innerText = nuevosCount > 99 ? "+99" : nuevosCount;
+            badge.style.display = "block";
+        }
+        if (mencionDetectada) {
+            reproducirSonidoChat();
+            lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
         }
     }
 }
@@ -4003,62 +5108,86 @@ async function aceptarNormasRegistro() {
 }
 
 
-// Carga los últimos episodios lanzados en Japón/Jikan
+// Carga los últimos episodios subidos por nosotros (desde Supabase + Anilist para imágenes/nombres)
 async function cargarUltimosEpisodios() {
-    const query = `
-    query ($start: Int, $end: Int) {
-      Page(perPage: 30) {
-        airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_DESC) {
-          episode
-          media {
-            idMal
-            popularity
-            title { romaji english native }
-            coverImage { large }
-            description
-            status
-            episodes
-          }
-        }
-      }
-    }`;
-
-    const now = Math.floor(Date.now() / 1000);
-    const hace3Dias = now - (3 * 24 * 60 * 60); // Ventana de 3 días para asegurar contenido
+    const listaRecientes = document.getElementById('lista-recientes');
+    if (!listaRecientes) return;
 
     try {
-        const res = await fetch('https://graphql.anilist.co', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ query, variables: { start: hace3Dias, end: now } })
-        });
+        // 1. Traer los últimos 20 episodios subidos a nuestra DB
+        const { data: enlaces, error } = await _db
+            .from('enlaces_episodios')
+            .select('*')
+            .order('id', { ascending: false })
+            .limit(20);
 
-        const json = await res.json();
-        const schedules = json.data.Page.airingSchedules;
+        if (error) throw error;
 
-        let dataAdaptada = schedules.map(s => ({
-            mal_id: s.media.idMal,
-            title: s.media.title.romaji || s.media.title.english,
-            titles: [
-                { type: 'Default', title: s.media.title.romaji },
-                { type: 'English', title: s.media.title.english }
-            ],
-            images: { jpg: { large_image_url: s.media.coverImage.large, image_url: s.media.coverImage.large } },
-            synopsis: s.media.description,
-            episodes: s.media.episodes,
-            status: s.media.status === 'RELEASING' ? 'Currently Airing' : 'Finished',
-            episode_number: s.episode,
-            popularity: s.media.popularity
-        }));
+        if (!enlaces || enlaces.length === 0) {
+            listaRecientes.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no se han subido episodios.</p>';
+            return;
+        }
 
-        // --- MEJORA: ORDENAR POR POPULARIDAD (De mayor a menor) ---
-        // Esto asegura que los animes más famosos salgan primero en la lista de recientes
-        dataAdaptada.sort((a, b) => b.popularity - a.popularity);
+        // 2. Obtener IDs únicos de animes
+        const idsUnicos = [...new Set(enlaces.map(ep => ep.anime_id))];
+        
+        // 3. Obtener metadatos desde Anilist (imágenes, nombres reales, etc.)
+        const metadataMap = await fetchAnilistBatch(idsUnicos);
 
-        // --- MOSTRAR LOS 10 MÁS POPULARES ---
-        renderGrid(dataAdaptada.slice(0, 10), 'lista-recientes');
+        // 4. Armar la lista usando datos de Anilist para imágenes/nombres
+        const animes = [];
+        const vistosIds = new Set();
+        
+        for (const ep of enlaces) {
+            const id = ep.anime_id;
+            const key = `${id}`;
+            if (vistosIds.has(key)) continue;
+            vistosIds.add(key);
+            
+            // Si tenemos datos de Anilist, los usamos
+            const meta = metadataMap[id];
+            if (meta) {
+                animes.push({
+                    ...meta,
+                    episode_number: ep.episodio_num,
+                    _source: 'anilist',
+                    _idioma: ep.idioma || 'sub'
+                });
+            } else {
+                // Fallback a datos básicos si Anilist no respondió
+                animes.push({
+                    mal_id: id,
+                    title: ep.anime_nombre || `Anime #${id}`,
+                    titles: [{ type: 'Default', title: ep.anime_nombre || `Anime #${id}` }],
+                    images: {
+                        jpg: {
+                            image_url: 'logo-aidume.png',
+                            large_image_url: 'logo-grande.png',
+                            small_image_url: 'logo-aidume.png'
+                        }
+                    },
+                    synopsis: "Episodio subido por la comunidad de AiduMe.",
+                    episodes: ep.episodio_num || 1,
+                    status: 'Currently Airing',
+                    episode_number: ep.episodio_num,
+                    _source: 'db',
+                    _idioma: ep.idioma || 'sub'
+                });
+            }
+        }
+
+        if (animes.length > 0) {
+            renderGrid(animes, 'lista-recientes');
+        } else {
+            listaRecientes.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los episodios recientes.</p>';
+        }
+
     } catch (e) {
-        console.error("Error cargando episodios recientes desde Anilist:", e);
+        console.error("Error cargando episodios recientes:", e);
+        const listaRecientes = document.getElementById('lista-recientes');
+        if (listaRecientes) {
+            listaRecientes.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Conectando con la base de datos...</p>';
+        }
     }
 }
 
@@ -4125,15 +5254,56 @@ async function buscarAnimeFusion(pagina = 1) {
     }
 
     try {
-        const response = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=asc&page=${paginaBusqueda}`);
-        const j = await response.json();
+        // Intentar Jikan primero con fetchWithFallback que automaticamente va a Anilist si falla
+        const result = await fetchWithFallback(
+            `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&order_by=popularity&sort=asc&page=${paginaBusqueda}`,
+            () => searchAnilist(q, paginaBusqueda, 24)
+        );
+
+        if (!result.ok) {
+            throw new Error(result.error || "La búsqueda no pudo completarse.");
+        }
+
+        const data = result.data;
         
-        if (j.data) {
-            renderGrid(j.data, 'lista-todos');
-            renderPaginacionBusqueda(j.pagination);
+        if (data && data.length > 0) {
+            renderGrid(data, 'lista-todos');
+            // Si vino de Anilist, no hay paginación exacta
+            if (result.source === 'jikan') {
+                renderPaginacionBusqueda(result.pagination);
+            } else {
+                // Paginación estimada para Anilist
+                renderPaginacionBusqueda({ has_next_page: data.length >= 24, last_visible_page: paginaBusqueda + 1 });
+            }
+            // Actualizar título para indicar la fuente
+            if (tituloTodos && result.source === 'anilist') {
+                tituloTodos.innerHTML = `🔍 RASTREANDO: <span style="color:white;">${q.toUpperCase()}</span> <span style="font-size:0.6rem; opacity:0.5;"></span>`;
+            }
+        } else {
+            if (listaTodos) {
+                listaTodos.innerHTML = `
+                    <div style="width:100%; text-align:center; padding:40px 20px;">
+                        <div style="font-size:2.5rem; margin-bottom:15px;">🔍</div>
+                        <p style="color:#888; font-size:0.85rem;">No se encontraron resultados para "${q}".</p>
+                        <p style="color:#666; font-size:0.75rem; margin-top:5px;">Prueba con otro término de búsqueda.</p>
+                    </div>`;
+            }
         }
     } catch (err) {
         console.error("Error en búsqueda:", err);
+        
+        if (listaTodos) {
+            const errorMsg = err.name === 'AbortError' 
+                ? 'La búsqueda tardó demasiado. Verifica tu conexión.'
+                : err.message || 'Error al buscar. Verifica tu conexión a internet.';
+            
+            listaTodos.innerHTML = `
+                <div style="width:100%; text-align:center; padding:40px 20px;">
+                    <div style="font-size:2.5rem; margin-bottom:15px;">⚠️</div>
+                    <p style="color:#ff6b6b; font-size:0.85rem; margin-bottom:15px;">${errorMsg}</p>
+                    <button onclick="buscarAnimeFusion(${pagina})" class="btn-random-gold" style="margin:5px;">🔄 REINTENTAR</button>
+                </div>`;
+        }
     }
 }
 
