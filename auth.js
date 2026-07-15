@@ -245,10 +245,36 @@ function solicitarPermisoNotificaciones() {
     }
 
     Notification.requestPermission().then(permission => {
-        if (permission === "granted" && 'serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').then(() => {
-                console.log("Service Worker de Oro registrado.");
-            });
+        if (permission === "granted") {
+            console.log("✅ Permiso de notificaciones concedido");
+            
+            // Registrar Service Worker para Android y Chrome
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('sw.js')
+                    .then(registration => {
+                        console.log("✅ Service Worker registrado:", registration.scope);
+                        
+                        // Verificar que el Service Worker esté activo
+                        if (registration.active) {
+                            console.log("✅ Service Worker está activo");
+                        } else if (registration.installing) {
+                            console.log("⏳ Service Worker está instalando...");
+                            registration.installing.addEventListener('statechange', () => {
+                                if (registration.active) {
+                                    console.log("✅ Service Worker ahora está activo");
+                                }
+                            });
+                        } else if (registration.waiting) {
+                            console.log("⏳ Service Worker está esperando...");
+                            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                        }
+                    })
+                    .catch(err => {
+                        console.error("❌ Error al registrar Service Worker:", err);
+                    });
+            }
+        } else {
+            console.log("❌ Permiso de notificaciones denegado:", permission);
         }
     });
 }
@@ -594,3 +620,22 @@ window.addEventListener('load', () => {
         chatBubble.style.display = 'none';
     }
 });
+
+
+// --- INICIALIZACIÓN DE INTERFAZ EN AUTH.JS ---
+document.addEventListener('DOMContentLoaded', () => {
+    const toggleRegPass = document.getElementById('toggle-reg-pass');
+    const regPassInput = document.getElementById('reg-pass');
+
+    if (toggleRegPass && regPassInput) {
+        toggleRegPass.addEventListener('click', () => {
+            // Alternamos entre password y text
+            const isPassword = regPassInput.type === 'password';
+            regPassInput.type = isPassword ? 'text' : 'password';
+            
+            // Cambiamos el emoji de manera dinámica
+            toggleRegPass.textContent = isPassword ? '🙈' : '👁️';
+        });
+    }
+});
+

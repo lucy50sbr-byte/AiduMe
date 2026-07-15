@@ -38,8 +38,14 @@
             
             <div id="reg-fields">
     <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-    <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-    
+    <div style="position: relative; width: 90%; margin: 0 auto 10px auto; display: flex; align-items: center;">
+    <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" 
+           style="width: 100%; padding: 12px 45px 12px 12px; border-radius: 10px; border: none; box-sizing: border-box;">
+    <button type="button" id="toggle-reg-pass" 
+            style="position: absolute; right: 12px; background: none; border: none; color: #888; cursor: pointer; font-size: 1.1rem; padding: 0; display: flex; align-items: center;">
+        👁️
+    </button>
+</div>
     <input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
     
     <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
@@ -187,7 +193,7 @@
             <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
             <div class="stat-item"><span class="stat-label">Miembro desde</span><span class="stat-value" id="stat-horas">--</span></div>
             <div class="stat-item clickable-stat" onclick="mostrarInfoFichas()"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
-            <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
+        <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
         </div>
 
         <div class="inner-badges-box">
@@ -420,7 +426,7 @@
             <button onclick="capturarIdActual()" class="btn-random-gold">📌 Capturar</button>
         </div>
         <input type="number" id="adm-ep-num" placeholder="Número de Episodio" class="modern-input">
-        <input type="text" id="adm-url" placeholder="URL del Video (Embed)" class="modern-input">
+        <input type="text" id="adm-url" placeholder="URL del Video (Embed)" class="modern-input" onclick="copiarAlPortapapeles('adm-url')" style="cursor: pointer;" title="Click para copiar">
     </div>
     <button onclick="guardarLinkEpisodio()" class="btn-filter-flv">✨ GUARDAR ENLACE DE ORO</button>
 </div>

@@ -591,6 +591,12 @@ window.addEventListener('load', () => {
 async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
     if (!nombreAMostrar) return;
 
+    // --- ELIMINAR BOTÓN VINCULAR TV INMEDIATAMENTE AL CAMBIAR DE PERFIL ---
+    const btnVincularTV = document.getElementById('btn-vincular-tv');
+    if (btnVincularTV) {
+        btnVincularTV.remove();
+    }
+
     // --- NUEVO: Guardamos el nombre del usuario que estamos viendo ---
     usuarioEnPantalla = nombreAMostrar;
 
@@ -799,7 +805,7 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
             if (elRacha) elRacha.innerText = statsData.racha;
         }
 
-        // === AGREGAR BOTÓN VINCULAR TV ===
+        // Solo agregar botón de vincular TV si es el propio perfil
         if (esMismoUsuario && typeof agregarBotonVincularTV === 'function') {
             agregarBotonVincularTV();
         }
@@ -1197,7 +1203,7 @@ function agregarBotonVincularTV() {
     const btn = document.createElement('button');
     btn.id = 'btn-vincular-tv';
     btn.className = 'btn-normas';
-    btn.style.cssText = 'border-color:#00d4ff; color:#00d4ff; background:rgba(0,212,255,0.05); margin-bottom:10px;';
+    btn.style.cssText = 'border-color:#00ff55; color:#00ff55; background:rgba(0,212,255,0.05); margin-bottom:10px;';
     btn.innerHTML = '📡 VINCULAR TV';
     btn.onclick = mostrarModalVincularTV;
     settings.before(btn);

@@ -319,6 +319,7 @@ async function initApp() {
     currentDayString = getTodayString(); // Initialize current day string
     await cargarDuelo();
     cargarHome();
+    renderContinuarViendo(); // Cargar sección "Continuar viendo"
     cargarUltimosEpisodios();
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
@@ -443,23 +444,34 @@ async function cargarHome() {
     if (!lista) return;
 
     try {
-        // 1. Traer TODOS los registros de episodios vistos para contar por anime
-        const { data: vistos, error } = await _db
-            .from('episodios_vistos')
-            .select('anime_id');
+        // 1. Traer TODOS los perfiles y sumar los log_vistos para contar por anime
+        const { data: perfiles, error } = await _db
+            .from('perfiles')
+            .select('log_vistos');
 
         if (error) throw error;
 
-        if (!vistos || vistos.length === 0) {
+        if (!perfiles || perfiles.length === 0) {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
             return;
         }
 
-        // 2. Contar vistas por anime_id
+        // 2. Contar vistas por anime_id sumando los arrays de cada perfil
         const conteo = {};
-        vistos.forEach(v => {
-            conteo[v.anime_id] = (conteo[v.anime_id] || 0) + 1;
+        perfiles.forEach(p => {
+            const log = p.log_vistos || {};
+            for (const animeId in log) {
+                const eps = log[animeId];
+                if (Array.isArray(eps)) {
+                    conteo[animeId] = (conteo[animeId] || 0) + eps.length;
+                }
+            }
         });
+
+        if (Object.keys(conteo).length === 0) {
+            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
+            return;
+        }
 
         // 3. Ordenar por cantidad de vistas (mayor a menor) y tomar top 10
         const top10Ids = Object.entries(conteo)
@@ -486,6 +498,124 @@ async function cargarHome() {
     } catch (e) {
         console.error("Error en cargarHome:", e);
         lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
+    }
+}
+
+/**
+ * Guarda el progreso de reproducción de un episodio
+ */
+async function guardarProgresoReproduccion(animeId, episodioNum, progresoSegundos) {
+    if (!currentUser || !animeId || !episodioNum) return;
+    
+    try {
+        await _db.from('progreso_reproduccion').upsert({
+            usuario: currentUser,
+            anime_id: animeId,
+            episodio_num: episodioNum,
+            progreso_segundos: progresoSegundos,
+            fecha_actualizacion: new Date().toISOString()
+        }, { onConflict: 'usuario,anime_id,episodio_num' });
+        
+        console.log(`✅ Progreso guardado: Ep ${episodioNum} de anime ${animeId} en ${progresoSegundos}s`);
+    } catch (err) {
+        console.error("Error al guardar progreso:", err);
+    }
+}
+
+/**
+ * Carga el progreso de reproducción de un anime específico
+ */
+async function cargarProgresoAnime(animeId) {
+    if (!currentUser || !animeId) return null;
+    
+    try {
+        const { data, error } = await _db
+            .from('progreso_reproduccion')
+            .select('*')
+            .eq('usuario', currentUser)
+            .eq('anime_id', animeId)
+            .order('fecha_actualizacion', { ascending: false })
+            .limit(1)
+            .single();
+        
+        if (error) throw error;
+        return data;
+    } catch (err) {
+        console.error("Error al cargar progreso:", err);
+        return null;
+    }
+}
+
+/**
+ * Carga todos los animes con progreso guardado para la sección "Continuar viendo"
+ */
+async function cargarContinuarViendo() {
+    if (!currentUser) return [];
+    
+    try {
+        const { data, error } = await _db
+            .from('progreso_reproduccion')
+            .select('*')
+            .eq('usuario', currentUser)
+            .order('fecha_actualizacion', { ascending: false })
+            .limit(10);
+        
+        if (error) throw error;
+        return data || [];
+    } catch (err) {
+        console.error("Error al cargar continuar viendo:", err);
+        return [];
+    }
+}
+
+/**
+ * Renderiza la sección "Continuar Viendo" con los animes con progreso guardado
+ */
+async function renderContinuarViendo() {
+    const seccion = document.getElementById('seccion-continuar-viendo');
+    const lista = document.getElementById('lista-continuar-viendo');
+    
+    if (!seccion || !lista) return;
+    
+    const progresoData = await cargarContinuarViendo();
+    
+    if (!progresoData || progresoData.length === 0) {
+        seccion.style.display = 'none';
+        return;
+    }
+    
+    seccion.style.display = 'block';
+    lista.innerHTML = '';
+    
+    // Obtener detalles de los animes
+    for (const item of progresoData) {
+        try {
+            const res = await fetch(`https://api.jikan.moe/v4/anime/${item.anime_id}`);
+            const animeData = await res.json();
+            const anime = animeData.data;
+            
+            const div = document.createElement('div');
+            div.className = 'card';
+            div.onclick = () => showDetails(anime);
+            
+            const minutos = Math.floor(item.progreso_segundos / 60);
+            const tiempoTexto = minutos > 0 ? `${minutos} min` : `${item.progreso_segundos}s`;
+            
+            div.innerHTML = `
+                <div class="card-img" style="background-image: url('${anime.images.jpg.large_image_url}');">
+                    <div class="progreso-badge" style="position: absolute; bottom: 5px; right: 5px; background: rgba(255,215,0,0.9); color: #000; padding: 3px 8px; border-radius: 5px; font-size: 0.7rem; font-weight: bold;">
+                        Ep ${item.episodio_num} • ${tiempoTexto}
+                    </div>
+                </div>
+                <div class="card-info">
+                    <h3 class="card-title">${anime.title}</h3>
+                </div>
+            `;
+            
+            lista.appendChild(div);
+        } catch (err) {
+            console.error("Error al cargar anime para continuar viendo:", err);
+        }
     }
 }
 
@@ -544,15 +674,11 @@ async function showDetails(a) {
 
         let listaVistos = [];
         try {
-            // A. Cargar progreso de vistos
+            // A. Cargar desde el log JSON en perfiles (1 fila por usuario, no miles)
             if (currentUser) {
-                const { data: vistos } = await _db
-                    .from('episodios_vistos')
-                    .select('episodio_num')
-                    .eq('usuario_nombre', currentUser)
-                    .eq('anime_id', a.mal_id);
-                console.log(`📚 Episodios vistos cargados para ${currentUser} (Anime ID ${a.mal_id}):`, vistos);
-                if (vistos) listaVistos = vistos.map(v => v.episodio_num);
+                const log = await obtenerLogVistos();
+                listaVistos = log[String(a.mal_id)] || [];
+                console.log(`📚 Episodios vistos cargados para ${currentUser} (Anime ID ${a.mal_id}):`, listaVistos);
             }
 
             // B. LÓGICA DE EXTENSIÓN
@@ -739,59 +865,186 @@ async function reportarFalla(numEpisodio, nombreAnime) {
     }
 }
 
-/** --- SISTEMA DE AMIGOS Y CHAT PRIVADO --- **/
+/** --- SISTEMA DE AMIGOS Y CHAT PRIVADO (JSON en perfil) --- **/
+
+// Claves para el JSON de amistades en perfiles
+const AMIGOS_KEY = 'amigos_data';
+
+/**
+ * Obtiene los datos de amistad de un usuario desde su perfil
+ */
+async function obtenerAmigosData(usuario) {
+    if (!usuario) return { amigos: [], solicitudes_recibidas: [], solicitudes_enviadas: [] };
+    try {
+        const { data } = await _db
+            .from('perfiles')
+            .select(AMIGOS_KEY)
+            .ilike('nombre', usuario)
+            .single();
+        return data?.[AMIGOS_KEY] || { amigos: [], solicitudes_recibidas: [], solicitudes_enviadas: [] };
+    } catch {
+        return { amigos: [], solicitudes_recibidas: [], solicitudes_enviadas: [] };
+    }
+}
+
+/**
+ * Guarda los datos de amistad en el perfil del usuario
+ */
+async function guardarAmigosData(usuario, data) {
+    if (!usuario) return;
+    await _db.from('perfiles').update({ [AMIGOS_KEY]: data }).ilike('nombre', usuario);
+}
 
 async function enviarSolicitudAmistad(usuarioDestino) {
     if (!currentUser) return;
     if (currentUser.trim().toLowerCase() === usuarioDestino.trim().toLowerCase()) return;
 
-    const { error } = await _db.from('amistades').insert([
-        { usuario_envia: currentUser.trim(), usuario_recibe: usuarioDestino.trim(), estado: 'pendiente' }
-    ]);
-    if (error) {
-        console.error("Error al enviar solicitud:", error.message);
-        if (error.code === '23505') { // Código de error para violación de restricción única
-            goldAlert({ title: "SOLICITUD PENDIENTE", text: "Ya existe una solicitud de amistad o ya son amigos.", icon: "📨" });
-        } else {
-            goldAlert({ title: "ERROR", text: "No se pudo enviar la solicitud: " + error.message, icon: "❌" });
+    try {
+        // Obtener datos de ambos usuarios
+        const [miData, destData] = await Promise.all([
+            obtenerAmigosData(currentUser),
+            obtenerAmigosData(usuarioDestino)
+        ]);
+
+        // Normalizar nombres
+        const yo = currentUser.trim();
+        const el = usuarioDestino.trim();
+
+        // Verificar si ya son amigos o ya hay solicitud
+        if (miData.amigos.includes(el)) {
+            return goldAlert({ title: "YA SON AMIGOS", text: `Ya eres amigo de @${el}.`, icon: "👥" });
         }
-    } else {
-        goldAlert({ title: "SOLICITUD ENVIADA", text: `Has invitado a @${usuarioDestino} a ser tu amigo.`, icon: "✨" });
+        if (miData.solicitudes_enviadas.includes(el)) {
+            return goldAlert({ title: "SOLICITUD PENDIENTE", text: `Ya enviaste una solicitud a @${el}.`, icon: "📨" });
+        }
+        if (miData.solicitudes_recibidas.includes(el)) {
+            // Si él ya me envió solicitud, la aceptamos automáticamente
+            return aceptarSolicitudAmistad(el);
+        }
+
+        // Agregar solicitud enviada a mi perfil
+        miData.solicitudes_enviadas.push(el);
+        await guardarAmigosData(currentUser, miData);
+
+        // Agregar solicitud recibida al perfil del destino
+        destData.solicitudes_recibidas.push(yo);
+        await guardarAmigosData(usuarioDestino, destData);
+
+        goldAlert({ title: "SOLICITUD ENVIADA", text: `Has invitado a @${el} a ser tu amigo.`, icon: "✨" });
         actualizarPerfilDesdeSQL(usuarioDestino);
+    } catch (err) {
+        console.error("Error al enviar solicitud:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo enviar la solicitud.", icon: "❌" });
+    }
+}
+
+/**
+ * Acepta una solicitud de amistad
+ */
+async function aceptarSolicitudAmistad(usuarioOrigen) {
+    if (!currentUser) return;
+    try {
+        const [miData, suData] = await Promise.all([
+            obtenerAmigosData(currentUser),
+            obtenerAmigosData(usuarioOrigen)
+        ]);
+
+        const yo = currentUser.trim();
+        const el = usuarioOrigen.trim();
+
+        // Quitar de solicitudes_recibidas mías y solicitudes_enviadas de él
+        miData.solicitudes_recibidas = miData.solicitudes_recibidas.filter(u => u !== el);
+        suData.solicitudes_enviadas = suData.solicitudes_enviadas.filter(u => u !== yo);
+
+        // Agregar a amigos de ambos
+        if (!miData.amigos.includes(el)) miData.amigos.push(el);
+        if (!suData.amigos.includes(yo)) suData.amigos.push(yo);
+
+        await Promise.all([
+            guardarAmigosData(currentUser, miData),
+            guardarAmigosData(usuarioOrigen, suData)
+        ]);
+
+        goldAlert({ title: "AMIGOS", text: `Ahora tú y @${el} son amigos.`, icon: "🤝" });
+        actualizarPerfilDesdeSQL();
+    } catch (err) {
+        console.error("Error al aceptar solicitud:", err);
+    }
+}
+
+/**
+ * Rechaza una solicitud de amistad
+ */
+async function rechazarSolicitudAmistad(usuarioOrigen) {
+    if (!currentUser) return;
+    try {
+        const [miData, suData] = await Promise.all([
+            obtenerAmigosData(currentUser),
+            obtenerAmigosData(usuarioOrigen)
+        ]);
+
+        const yo = currentUser.trim();
+        const el = usuarioOrigen.trim();
+
+        miData.solicitudes_recibidas = miData.solicitudes_recibidas.filter(u => u !== el);
+        suData.solicitudes_enviadas = suData.solicitudes_enviadas.filter(u => u !== yo);
+
+        await Promise.all([
+            guardarAmigosData(currentUser, miData),
+            guardarAmigosData(usuarioOrigen, suData)
+        ]);
+
+        goldAlert({ title: "RECHAZADA", text: `Has rechazado la solicitud de @${el}.`, icon: "❌" });
+        actualizarPerfilDesdeSQL();
+    } catch (err) {
+        console.error("Error al rechazar solicitud:", err);
     }
 }
 
 /**
  * Escucha en tiempo real si alguien envía una solicitud al usuario actual
+ * (Polling cada 15 segundos ya que no tenemos tabla para Realtime)
  */
 function escucharSolicitudesAmistad() {
     if (!currentUser) return;
+    
+    let ultimasSolicitudes = [];
+    
+    setInterval(async () => {
+        if (!currentUser) return;
+        const miData = await obtenerAmigosData(currentUser);
+        const nuevas = miData.solicitudes_recibidas.filter(s => !ultimasSolicitudes.includes(s));
+        
+        if (nuevas.length > 0) {
+            ultimasSolicitudes = [...miData.solicitudes_recibidas];
+            
+            for (const solicitante of nuevas) {
+                reproducirSonidoAnime();
+                
+                const seccionAmigos = document.getElementById('seccion-amigos-perfil');
+                if (seccionAmigos && seccionAmigos.style.display !== 'none') {
+                    actualizarPerfilDesdeSQL();
+                }
 
-    _db.channel('amistades-radar')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'amistades' }, async payload => {
-        const s = payload.new;
-        // Comprobamos si la solicitud es para mí
-        if (s.usuario_recibe.trim().toLowerCase() === currentUser.trim().toLowerCase() && s.estado === 'pendiente') {
-            reproducirSonidoAnime();
-            // Si el usuario está viendo su propio perfil, refrescamos la lista automáticamente
-            const seccionAmigos = document.getElementById('seccion-amigos-perfil');
-            if (seccionAmigos && seccionAmigos.style.display !== 'none') {
-                actualizarPerfilDesdeSQL();
-            }
+                const respuesta = await goldAlert({
+                    title: "NUEVA SOLICITUD",
+                    text: `@${solicitante} quiere ser tu amigo.`,
+                    icon: "👥",
+                    showCancel: true,
+                    confirmText: "ACEPTAR"
+                });
 
-            const respuesta = await goldAlert({
-                title: "NUEVA SOLICITUD",
-                text: `@${s.usuario_envia} quiere ser tu amigo.`,
-                icon: "👥",
-                showCancel: true,
-                confirmText: "ACEPTAR"
-            });
-
-            if (respuesta) {
-                gestionarSolicitud(s.id, 'aceptar', s.usuario_envia);
+                if (respuesta) {
+                    await aceptarSolicitudAmistad(solicitante);
+                } else {
+                    await rechazarSolicitudAmistad(solicitante);
+                }
             }
         }
-    }).subscribe();
+        
+        // Actualizar lista de solicitudes conocidas
+        ultimasSolicitudes = [...miData.solicitudes_recibidas];
+    }, 15000);
 }
 
 /**
@@ -820,6 +1073,49 @@ async function triggerAppUpdate() {
     } catch (err) {
         console.error("Error al forzar actualización:", err);
         goldAlert({ title: "ERROR", text: "No se pudo enviar la señal de actualización.", icon: "❌" });
+    }
+}
+
+/**
+ * Verifica periódicamente si hay actualizaciones disponibles en Supabase
+ * y recarga la aplicación si detecta un cambio de versión
+ */
+async function checkForAppUpdate() {
+    try {
+        const { data, error } = await _db
+            .from('app_settings')
+            .select('value')
+            .eq('key', 'app_version')
+            .single();
+        
+        if (error) throw error;
+        
+        const remoteVersion = data?.value;
+        const localVersion = localStorage.getItem('aidume_app_version');
+        
+        // Si no hay versión local, guardar la actual
+        if (!localVersion && remoteVersion) {
+            localStorage.setItem('aidume_app_version', remoteVersion);
+            return;
+        }
+        
+        // Si las versiones son diferentes, recargar la app
+        if (remoteVersion && localVersion && remoteVersion !== localVersion) {
+            console.log('🚀 Nueva versión detectada, recargando aplicación...');
+            localStorage.setItem('aidume_app_version', remoteVersion);
+            
+            // Mostrar alerta antes de recargar
+            await goldAlert({
+                title: "ACTUALIZACIÓN DISPONIBLE",
+                text: "Hay una nueva versión de AiduMe. La aplicación se recargará automáticamente.",
+                icon: "🔄",
+                confirmText: "ENTENDIDO"
+            });
+            
+            location.reload();
+        }
+    } catch (err) {
+        console.error("Error al verificar actualizaciones:", err);
     }
 }
 
@@ -1239,29 +1535,27 @@ async function renderizarSeccionAmigos(perfil, esMismoUsuario) {
     if (esMismoUsuario) {
         seccion.style.display = 'block';
         const myUser = currentUser.trim();
-        const { data: solicitudes } = await _db.from('amistades').select('*').ilike('usuario_recibe', myUser).eq('estado', 'pendiente');
-        const { data: amigos1 } = await _db.from('amistades').select('usuario_recibe').ilike('usuario_envia', myUser).eq('estado', 'aceptada');
-        const { data: amigos2 } = await _db.from('amistades').select('usuario_envia').ilike('usuario_recibe', myUser).eq('estado', 'aceptada');
+        const miData = await obtenerAmigosData(myUser);
+
+        const solicitudes = miData.solicitudes_recibidas || [];
+        const nombresAmigos = miData.amigos || [];
 
         console.log("👥 Solicitudes pendientes:", solicitudes);
 
         let html = "";
-        if (solicitudes?.length > 0) {
+        if (solicitudes.length > 0) {
             html += `<p style="color:var(--gold); font-size:0.7rem; font-weight:bold;">SOLICITUDES PENDIENTES:</p>`;
             solicitudes.forEach(s => {
                 html += `
                 <div class="friend-item">
-                    <span style="font-size:0.8rem;">@${s.usuario_envia}</span>
+                    <span style="font-size:0.8rem;">@${s}</span>
                     <div style="display:flex; gap:5px;">
-                        <button onclick="gestionarSolicitud(${s.id}, 'aceptar', '${s.usuario_envia}')" class="btn-random-gold" style="padding:4px 8px; margin:0;">✔️</button>
-                        <button onclick="gestionarSolicitud(${s.id}, 'rechazar')" class="btn-random-gold" style="padding:4px 8px; margin:0; border-color:red; color:red;">❌</button>
+                        <button onclick="aceptarSolicitudAmistad('${s}')" class="btn-random-gold" style="padding:4px 8px; margin:0;">✔️</button>
+                        <button onclick="rechazarSolicitudAmistad('${s}')" class="btn-random-gold" style="padding:4px 8px; margin:0; border-color:red; color:red;">❌</button>
                     </div>
                 </div>`;
             });
         }
-
-        const nombresAmigos = [...new Set([...(amigos1?.map(a => a.usuario_recibe) || []), ...(amigos2?.map(a => a.usuario_envia) || [])])];
-        console.log("🤝 Nombres de amigos:", nombresAmigos);
         
         // --- MEJORA: CONTADOR DE MENSAJES NO LEÍDOS ---
         const { data: noLeidosData } = await _db.from('chat_privado')
@@ -1454,48 +1748,68 @@ function iniciarContadorOnline() {
 /**
  * Gestiona el guardado real en la base de datos y otorga premios.
  */
+// --- LOG DE VISTOS EN PERFIL (JSON comprimido, 1 fila por usuario) ---
+// En vez de crear una fila en episodios_vistos por cada click,
+// guardamos un objeto JSON en el perfil: { "animeId": [ep1, ep2, ep3] }
+// Esto reduce enormemente la cantidad de filas en la DB.
+const LOG_VISTOS_KEY = 'log_vistos'; // columna en perfiles que almacena el JSON
+
+/**
+ * Obtiene el log de vistos del usuario actual desde su perfil
+ */
+async function obtenerLogVistos() {
+    if (!currentUser) return {};
+    try {
+        const { data } = await _db
+            .from('perfiles')
+            .select(LOG_VISTOS_KEY)
+            .ilike('nombre', currentUser)
+            .single();
+        return data?.[LOG_VISTOS_KEY] || {};
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * Guarda el log de vistos en el perfil del usuario (1 sola actualización)
+ */
+async function guardarLogVistos(log) {
+    if (!currentUser) return;
+    await _db.from('perfiles').update({ [LOG_VISTOS_KEY]: log }).ilike('nombre', currentUser);
+}
+
 async function toggleEpisodioVisto(animeId, epNum, checkbox) {
     if (!currentUser) return goldAlert({ text: "Inicia sesión para guardar tu progreso", icon: "👤" });
 
     try {
+        const log = await obtenerLogVistos();
+        const animeKey = String(animeId);
+        
+        // Asegurar que sea un array
+        if (!log[animeKey]) log[animeKey] = [];
+
         if (checkbox.checked) {
-            const { error } = await _db.from('episodios_vistos').insert([{
-                usuario_nombre: currentUser,
-                anime_id: animeId,
-                episodio_num: epNum
-            }]);
-            if (error) throw error;
-
-            console.log(`✅ Guardado en DB: Anime ${animeId}, Ep ${epNum}`);
-            
-            // --- SISTEMA DE RECOMPENSA ÚNICA ---
-            // Intentamos insertar en una tabla de control. Si ya existe, Supabase dará error y no daremos monedas.
-            // Nota: Debes tener una tabla 'recompensas_otorgadas' con UNIQUE(usuario, anime_id, episodio)
-            const { error: errorUnico } = await _db.from('recompensas_otorgadas').insert([{
-                usuario: currentUser.trim(),
-                anime_id: animeId,
-                episodio: epNum
-            }]);
-
-            if (!errorUnico) {
-                // Si NO hubo error, significa que es la primera vez que lo ve
+            // Solo agregar si no estaba ya (evita duplicados)
+            if (!log[animeKey].includes(epNum)) {
+                log[animeKey].push(epNum);
+                
+                // --- RECOMPENSA ÚNICA (solo primera vez que ve este episodio) ---
                 await ganarRecompensaGold({ xp: 1, fichas: 2, silencioso: false });
-                console.log("💰 XP y Fichas otorgadas correctamente.");
-            } else {
-                // Si hubo error (404 o duplicate), lo ignoramos silenciosamente
-                console.log("ℹ️ Este episodio ya dio XP anteriormente.");
+                console.log(`💰 XP y Fichas otorgadas por Ep ${epNum} de Anime ${animeId}`);
             }
         } else {
-            const { error } = await _db.from('episodios_vistos').delete()
-                .eq('usuario_nombre', currentUser)
-                .eq('anime_id', animeId)
-                .eq('episodio_num', epNum);
-            if (error) throw error;
-
-            console.log(`❌ Eliminado de DB: Anime ${animeId}, Ep ${epNum}`);
+            // Quitar episodio del array
+            log[animeKey] = log[animeKey].filter(e => e !== epNum);
+            // Si el array queda vacío, borramos la clave para ahorrar espacio
+            if (log[animeKey].length === 0) delete log[animeKey];
         }
 
-        // FORZAMOS EL REFRESCO DE LA UI: Esto asegura que el contador y la barra se muevan
+        // Guardar todo el log de una sola vez (1 UPDATE en perfiles)
+        await guardarLogVistos(log);
+        console.log(`✅ Log de vistos actualizado: Anime ${animeId}, Ep ${epNum}`);
+
+        // Refrescar UI
         if (typeof actualizarPerfilDesdeSQL === 'function') {
             actualizarPerfilDesdeSQL(usuarioEnPantalla || currentUser);
         }
@@ -1557,7 +1871,12 @@ async function rateAnime(stars) {
             .maybeSingle();
 
         if (yaVoto) {
-            alert("Ya has calificado este anime. ¡Tu voto es permanente!");
+            // Reemplazamos el alert feo por tu Alerta de Oro
+            await goldAlert({
+                title: "VOTO REGISTRADO",
+                text: "Ya has calificado este anime anteriormente. ¡Tu voto es permanente en la base de datos de AiduMe!",
+                icon: "⭐"
+            });
             return;
         }
 
@@ -1575,9 +1894,21 @@ async function rateAnime(stars) {
         // 3. Bloqueamos las estrellas visualmente
         updateStars(stars, true);
         cargarPuntuacionComunidad(currentAnime.mal_id);
+
+        // Alerta de éxito al registrar el voto
+        await goldAlert({
+            title: "¡VALORACIÓN ENVIADA!",
+            text: `Le diste ${stars} estrellas a ${currentAnime.title || 'este anime'}. ¡Gracias por ayudar a la comunidad!`,
+            icon: "✨"
+        });
         
     } catch (err) {
         console.error("Error al votar:", err.message);
+        await goldAlert({
+            title: "ERROR DE CONEXIÓN",
+            text: "No se pudo registrar tu calificación en este momento. Inténtalo de nuevo más tarde.",
+            icon: "⚡"
+        });
     }
 }
 
@@ -2063,60 +2394,46 @@ async function calcularEstadisticasVisualizacion(nombreUsuario) {
     try {
         // 1. Ejecutar todas las consultas en paralelo
         const [
-            episodiosRes,
             favoritosRes,
             comentariosRes,
             valoracionesRes,
             perfilRes
         ] = await Promise.all([
-            _db.from('episodios_vistos').select('id', { count: 'exact', head: true }).eq('usuario_nombre', nombreUsuario),
             _db.from('favoritos').select('id', { count: 'exact', head: true }).ilike('usuario_nombre', nombreUsuario),
             _db.from('comentarios').select('id', { count: 'exact', head: true }).eq('usuario', nombreUsuario),
             _db.from('valoraciones').select('id', { count: 'exact', head: true }).ilike('usuario_nombre', nombreUsuario),
             _db.from('perfiles').select('racha_dias').ilike('nombre', nombreUsuario).single()
         ]);
 
-        const totalEpisodios = episodiosRes.count || 0;
         const totalFavoritos = favoritosRes.count || 0;
         const totalComentarios = comentariosRes.count || 0;
         const totalValoraciones = valoracionesRes.count || 0;
         const rachaDias = perfilRes.data?.racha_dias || 0;
 
+        // Contar episodios desde el JSON del perfil (log_vistos)
+        const { data: perfilData } = await _db
+            .from('perfiles')
+            .select('log_vistos')
+            .ilike('nombre', nombreUsuario)
+            .single();
+        
+        const logVistos = perfilData?.log_vistos || {};
+        let totalEpisodios = 0;
+        let animesCompletados = 0;
+        
+        // Sumar todos los episodios vistos del JSON
+        for (const animeId in logVistos) {
+            const eps = logVistos[animeId];
+            if (Array.isArray(eps)) {
+                totalEpisodios += eps.length;
+                if (eps.length > 0) animesCompletados++;
+            }
+        }
+
         // 2. Calcular horas estimadas (promedio 24 min por episodio)
         const minutosTotales = totalEpisodios * 24;
         const horasEstimadas = Math.floor(minutosTotales / 60);
         const minutosRestantes = minutosTotales % 60;
-
-        // 3. Calcular animes completados (favoritos que tienen todos los episodios vistos)
-        // Esto es una estimación: asumimos que si tiene el anime en favoritos y al menos
-        // algunos episodios vistos, cuenta como "completado" si el ratio es alto
-        let animesCompletados = 0;
-        try {
-            // Obtenemos los IDs de animes que el usuario tiene en favoritos
-            const { data: favoritosData } = await _db
-                .from('favoritos')
-                .select('anime_id')
-                .ilike('usuario_nombre', nombreUsuario);
-            
-            if (favoritosData && favoritosData.length > 0) {
-                // Para cada favorito, contamos cuántos episodios vio
-                for (const fav of favoritosData) {
-                    const { count: epsVistos } = await _db
-                        .from('episodios_vistos')
-                        .select('id', { count: 'exact', head: true })
-                        .eq('usuario_nombre', nombreUsuario)
-                        .eq('anime_id', fav.anime_id);
-                    
-                    // Si vio al menos 1 episodio de ese anime, lo consideramos "completado"
-                    // (no podemos saber el total de episodios del anime sin llamar a Jikan)
-                    if (epsVistos && epsVistos >= 1) {
-                        animesCompletados++;
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn("Error calculando animes completados:", e);
-        }
 
         return {
             episodios: totalEpisodios,
@@ -2821,7 +3138,61 @@ function agendarNotificacionAnilist(titulo, imagen, airingAt, animeId) {
     });
 }
 
-function irAnimeAzar() { fetch('https://api.jikan.moe/v4/random/anime').then(r=>r.json()).then(j=>showDetails(j.data)); }
+async function irAnimeAzar() {
+    try {
+        const query = `
+        query ($page: Int) {
+            Page(page: $page, perPage: 1) {
+                media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
+                    id
+                    idMal
+                    title { romaji english native }
+                    coverImage { extraLarge large medium }
+                    description
+                    episodes
+                    status
+                    averageScore
+                    format
+                    season
+                    seasonYear
+                    genres
+                }
+            }
+        }`;
+        
+        // Página aleatoria entre 1 y 200 para obtener variedad
+        const paginaRandom = Math.floor(Math.random() * 200) + 1;
+        
+        const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ query, variables: { page: paginaRandom } })
+        });
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+        const media = json.data?.Page?.media?.[0];
+        
+        if (!media || !media.idMal) {
+            throw new Error("Datos inválidos");
+        }
+        
+        // Adaptar al formato que usa la app
+        const anime = adaptAnilistToMALFormat([media])[0];
+        showDetails(anime);
+    } catch (e) {
+        console.error("Error en anime aleatorio:", e.message);
+        goldAlert({
+            title: "ERROR",
+            text: "No se pudo cargar un anime aleatorio. ¡Intenta de nuevo!",
+            icon: "😿",
+            confirmText: "INTENTAR DE NUEVO"
+        });
+    }
+}
 function hideDetails() { document.getElementById('details').style.display = "none"; }
 
 async function cargarRelaciones(id) {
@@ -2970,11 +3341,17 @@ const GENRES_LIST = [
     { id: 37, name: "Sobrenatural" }, { id: 41, name: "Suspenso" }
 ];
 
-// Agrega esto a tu lista de géneros o usa la que ya tienes
+// Lista de géneros de Anilist (strings en lugar de IDs numéricos de Jikan)
 const GENRES_FLV = [
-    { id: 1, name: "Acción" }, { id: 2, name: "Aventuras" }, { id: 4, name: "Comedia" },
-    { id: 8, name: "Drama" }, { id: 10, name: "Fantasía" }, { id: 7, name: "Misterio" },
-    { id: 22, name: "Romance" }, { id: 37, name: "Sobrenatural" }, { id: 41, name: "Suspenso" }
+    { id: "Action", name: "Acción" }, 
+    { id: "Adventure", name: "Aventuras" }, 
+    { id: "Comedy", name: "Comedia" },
+    { id: "Drama", name: "Drama" }, 
+    { id: "Fantasy", name: "Fantasía" }, 
+    { id: "Mystery", name: "Misterio" },
+    { id: "Romance", name: "Romance" }, 
+    { id: "Supernatural", name: "Sobrenatural" }, 
+    { id: "Thriller", name: "Suspenso" }
 ];
 
 function cargarGenerosEnPanel() {
@@ -2983,7 +3360,7 @@ function cargarGenerosEnPanel() {
     
     GENRES_FLV.forEach(g => {
         const opt = document.createElement('option');
-        opt.value = g.id;
+        opt.value = g.id; // Guarda el string de Anilist (ej: "Action", "Comedy")
         opt.innerText = g.name;
         select.appendChild(opt);
     });
@@ -3026,25 +3403,79 @@ async function aplicarFiltrosAvanzados(pagina = 1) {
             </div>`;
     }
 
-    let url = `https://api.jikan.moe/v4/anime?order_by=${order}&sort=desc&limit=24&page=${paginaFiltros}`;
+    // Mapeo de estados de Jikan a Anilist
+    const statusMap = {
+        'airing': 'RELEASING',
+        'complete': 'FINISHED'
+    };
     
-    if (genre) url += `&genres=${genre}`;
-    if (status) url += `&status=${status}`;
+    // Mapeo de ordenamiento de Jikan a Anilist
+    const orderMap = {
+        'score': 'SCORE_DESC',
+        'popularity': 'POPULARITY_DESC',
+        'ranked': 'RANKING'
+    };
+    
+    const anilistStatus = status ? statusMap[status] : null;
+    const anilistSort = orderMap[order] || 'POPULARITY_DESC';
+    
+    // Construir consulta GraphQL para Anilist
+    let graphqlQuery = `
+    query ($page: Int, $perPage: Int, $sort: [MediaSort], $status: MediaStatus, $genre: String) {
+      Page(page: $page, perPage: $perPage) {
+        media(type: ANIME, sort: $sort, status: $status, genre: $genre) {
+          id
+          idMal
+          title { romaji english native }
+          coverImage { extraLarge large medium }
+          description
+          episodes
+          status
+          averageScore
+          format
+          season
+          seasonYear
+          genres
+        }
+        pageInfo {
+          total
+          perPage
+          currentPage
+          lastPage
+          hasNextPage
+        }
+      }
+    }`;
+    
+    const variables = {
+        page: paginaFiltros,
+        perPage: 24,
+        sort: anilistSort
+    };
+    
+    if (anilistStatus) variables.status = anilistStatus;
+    if (genre) variables.genre = genre;
 
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-        const r = await fetch(url, { signal: controller.signal });
+        const r = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ query: graphqlQuery, variables }),
+            signal: controller.signal
+        });
         clearTimeout(timeoutId);
 
-        if (!r.ok) throw new Error(`Error HTTP ${r.status}: La API de filtros no respondió.`);
+        if (!r.ok) throw new Error(`Error HTTP ${r.status}: La API de Anilist no respondió.`);
 
         const j = await r.json();
 
-        if (j.data && j.data.length > 0) {
-            renderGrid(j.data, 'lista-todos');
-            renderPaginacionFiltros(j.pagination);
+        if (j.data?.Page?.media && j.data.Page.media.length > 0) {
+            const adaptedData = adaptAnilistToMALFormat(j.data.Page.media);
+            renderGrid(adaptedData, 'lista-todos');
+            renderPaginacionFiltros(j.data.Page.pageInfo);
         } else {
             if (listaTodos) {
                 listaTodos.innerHTML = `
@@ -3087,16 +3518,21 @@ function renderPaginacionFiltros(info) {
     let contenedorFiltros = document.getElementById('paginacion-filtros');
     if (contenedorFiltros) contenedorFiltros.remove();
 
-    if (!info.has_next_page && paginaFiltros === 1) return;
+    // Estructura de Anilist: hasNextPage, currentPage, lastPage
+    const hasNextPage = info.hasNextPage;
+    const currentPage = info.currentPage || paginaFiltros;
+    const lastPage = info.lastPage;
+
+    if (!hasNextPage && currentPage === 1) return;
 
     contenedorFiltros = document.createElement('div');
     contenedorFiltros.id = 'paginacion-filtros';
     contenedorFiltros.style = "display: flex; justify-content: center; align-items: center; gap: 20px; margin: 30px 0; padding-bottom: 20px;";
 
     contenedorFiltros.innerHTML = `
-        <button onclick="aplicarFiltrosAvanzados(${paginaFiltros - 1})" class="btn-random-gold" ${paginaFiltros === 1 ? 'disabled style="opacity:0.5"' : ''}>❮ Anterior</button>
-        <span style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página ${paginaFiltros}</span>
-        <button onclick="aplicarFiltrosAvanzados(${paginaFiltros + 1})" class="btn-random-gold" ${!info.has_next_page ? 'disabled style="opacity:0.5"' : ''}>Siguiente ❯</button>
+        <button onclick="aplicarFiltrosAvanzados(${currentPage - 1})" class="btn-random-gold" ${currentPage === 1 ? 'disabled style="opacity:0.5"' : ''}>❮ Anterior</button>
+        <span style="color: var(--gold); font-weight: bold; font-size: 1.1rem;">Página ${currentPage} de ${lastPage || '?'}</span>
+        <button onclick="aplicarFiltrosAvanzados(${currentPage + 1})" class="btn-random-gold" ${!hasNextPage ? 'disabled style="opacity:0.5"' : ''}>Siguiente ❯</button>
     `;
 
     document.getElementById('lista-todos').after(contenedorFiltros);
@@ -3236,7 +3672,7 @@ async function suspenderUsuarioDinamico() {
 async function aplicarSancion(user, horas) {
     try {
         const { data: moderador } = await _db.from('perfiles').select('rol').ilike('nombre', currentUser).single();
-        const { data: objetivo } = await _db.from('perfiles').select('rol').ilike('nombre', user).single();
+        const { data: objetivo } = await _db.from('perfiles').select('rol, sancion_motivo').ilike('nombre', user).single();
 
         if (!objetivo) return goldAlert({ title: "ERROR", text: "El usuario objetivo no existe en la base de datos.", icon: "❌" });
 
@@ -3244,7 +3680,10 @@ async function aplicarSancion(user, horas) {
         if (objetivo.rol === 'dueño') {
             if (moderador.rol === 'admin') {
                 const fechaKarma = new Date('2099-01-01').toISOString();
-                await _db.from('perfiles').update({ baneado_hasta: fechaKarma }).ilike('nombre', currentUser);
+                await _db.from('perfiles').update({ 
+                    baneado_hasta: fechaKarma,
+                    sancion_motivo: `Traición: ${currentUser} intentó banear al DUEÑO`
+                }).ilike('nombre', currentUser);
                 
                 await goldAlert({ 
                     title: "TRAICIÓN DETECTADA", 
@@ -3268,10 +3707,27 @@ async function aplicarSancion(user, horas) {
             fechaBaneo = new Date('2099-01-01').toISOString(); 
         }
 
+        // --- PEDIR MOTIVO ANTES DE CONFIRMAR ---
+        const motivo = await goldAlert({
+            title: "MOTIVO DE LA SANCIÓN",
+            text: `Escribe el motivo por el cual ${esPermanente ? 'baneas permanentemente' : 'suspendes por ' + horas + 'h'} a @${user}.\n\nEste motivo quedará registrado y visible para el moderador.`,
+            icon: "📝",
+            showInput: true,
+            showCancel: true,
+            confirmText: "CONTINUAR"
+        });
+
+        if (!motivo || motivo.trim().length < 4) {
+            if (motivo !== null) {
+                goldAlert({ title: "MOTIVO INVÁLIDO", text: "Debes escribir un motivo descriptivo (mín. 4 caracteres).", icon: "✍️" });
+            }
+            return;
+        }
+
         // Confirmación antes de ejecutar
         const confirmar = await goldAlert({
             title: "CONFIRMAR SANCIÓN",
-            text: `¿Estás seguro de que quieres ${esPermanente ? 'BANEAR PERMANENTEMENTE' : 'SUSPENDER'} a @${user}?`,
+            text: `¿Estás seguro de que quieres ${esPermanente ? 'BANEAR PERMANENTEMENTE' : 'SUSPENDER'} a @${user}?\n\nMotivo: ${motivo.trim()}`,
             icon: "⚖️",
             showCancel: true,
             confirmText: "SÍ, EJECUTAR"
@@ -3281,14 +3737,19 @@ async function aplicarSancion(user, horas) {
 
         const { error } = await _db
             .from('perfiles')
-            .update({ baneado_hasta: fechaBaneo })
+            .update({ 
+                baneado_hasta: fechaBaneo,
+                sancion_motivo: motivo.trim(),
+                sancion_por: currentUser.trim(),
+                sancion_fecha: new Date().toISOString()
+            })
             .ilike('nombre', user);
 
         if (error) throw error;
         
         goldAlert({ 
             title: "SENTENCIA APLICADA", 
-            text: `El usuario @${user} ha sido ${esPermanente ? 'expulsado permanentemente' : 'suspendido por ' + horas + 'h'}.`, 
+            text: `El usuario @${user} ha sido ${esPermanente ? 'expulsado permanentemente' : 'suspendido por ' + horas + 'h'}.\nMotivo: ${motivo.trim()}`, 
             icon: "🔨" 
         });
         
@@ -3425,7 +3886,7 @@ async function cargarComentariosAdmin() {
                         <div style="flex: 1;">
                             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
                                 <span style="color:var(--gold); font-size:0.7rem; font-weight:900;">
-                                    ${grupo.esChat ? '💜 REPORTE DE CHAT' : '🚨 REPORTE DE ANIME'} (${grupo.cantidad})
+                                    ${grupo.esChat ? '💜 REPORTE DE CHAT' : '🚨 REPORTE DE COMENTARIO'} (${grupo.cantidad})
                                 </span>
                                 <span style="color:rgba(255,255,255,0.4); font-size:0.7rem;">|</span>
                                 <span style="color:#fff; font-size:0.75rem; font-weight:bold;">${usuarioObjetivo}</span>
@@ -3527,14 +3988,23 @@ window.borrarGrupoReportes = async function(ids) {
             .in('id', ids);
 
         if (error) {
-            // Si Supabase devuelve error, lo mostramos
+            // Si Supabase devuelve error, lo mostramos con goldAlert
             console.error("Error de Supabase:", error.message);
-            alert("Error al borrar: " + error.message);
+            await goldAlert({
+                title: "ERROR AL MODERAR",
+                text: "Ocurrió un problema en la base de datos: " + error.message,
+                icon: "⚠️"
+            });
             return;
         }
 
-        // 3. Feedback visual de éxito
+        // 3. Feedback visual de éxito con tu sistema de alertas
         console.log("Borrado exitoso.");
+        await goldAlert({
+            title: "REPORTES LIMPIADOS",
+            text: "Los reportes seleccionados han sido marcados como revisados con éxito.",
+            icon: "🧹"
+        });
         
         // 4. Recarga la lista
         await cargarComentariosAdmin();
@@ -3542,6 +4012,11 @@ window.borrarGrupoReportes = async function(ids) {
     } catch (err) {
         // Errores de red o de código
         console.error("Error crítico en la función:", err);
+        await goldAlert({
+            title: "ERROR CRÍTICO",
+            text: "No se pudo completar la operación de moderación debido a un fallo inesperado.",
+            icon: "❌"
+        });
     }
 };
 
@@ -3694,7 +4169,13 @@ async function guardarNuevaBio() {
         
     } catch (err) {
         console.error("Error al guardar bio:", err.message);
-        alert("Error de conexión");
+        
+        // Reemplazamos el alert feo del navegador por la Alerta de Oro
+        await goldAlert({
+            title: "ERROR DE SISTEMA",
+            text: "No se pudo actualizar tu biografía debido a un error de conexión con el servidor.",
+            icon: "⚡"
+        });
     }
 }
 
@@ -3908,6 +4389,20 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
             
+            // Guardar progreso inicial al cargar el episodio
+            guardarProgresoReproduccion(currentAnime.mal_id, num, 0);
+            
+            // Configurar guardado automático de progreso cada 30 segundos
+            const progresoInterval = setInterval(() => {
+                if (container.style.display === 'none') {
+                    clearInterval(progresoInterval);
+                    return;
+                }
+                // Estimamos el progreso basado en el tiempo transcurrido
+                const tiempoEstimado = Math.floor((Date.now() - playbackStartTime) / 1000);
+                guardarProgresoReproduccion(currentAnime.mal_id, num, tiempoEstimado);
+            }, 30000);
+            
             // Scroll suave al reproductor para centrar la vista
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
@@ -3981,17 +4476,59 @@ async function cambiarIdiomaReproductor(nuevoIdioma) {
 }
 
 // Función para capturar el ID del anime que estás viendo y ponerlo en el panel
-function capturarIdActual() {
+async function capturarIdActual() {
     if (currentAnime && currentAnime.mal_id) {
         const inputId = document.getElementById('adm-anime-id');
         if (inputId) {
             inputId.value = currentAnime.mal_id;
-            // Opcional: un pequeño efecto visual para saber que funcionó
+            
+            // Efecto visual rápido en el borde del input
             inputId.style.borderColor = "var(--gold)";
             setTimeout(() => inputId.style.borderColor = "rgba(255,215,0,0.3)", 500);
+            
+            // Opcional: Una alerta de éxito sutil para confirmar la captura
+            await goldAlert({
+                title: "ID CAPTURADO",
+                text: `Se vinculó el ID ${currentAnime.mal_id} (${currentAnime.title}) con éxito.`,
+                icon: "📌"
+            });
         }
     } else {
-        alert("Primero debes abrir la ficha de un anime (haz clic en uno) para poder capturar su ID.");
+        // Reemplazamos el alert feo por tu goldAlert
+        await goldAlert({
+            title: "ACCESO DENEGADO",
+            text: "Primero debes abrir la ficha de un anime (haz clic en uno de la lista) para poder capturar su ID de forma automática.",
+            icon: "🔑"
+        });
+    }
+}
+
+/**
+ * Copia el contenido del input al portapapeles
+ */
+async function copiarAlPortapapeles(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input || !input.value) return;
+    
+    try {
+        await navigator.clipboard.writeText(input.value);
+        
+        // Feedback visual temporal
+        const originalPlaceholder = input.placeholder;
+        input.placeholder = "✅ ¡Copiado!";
+        input.style.borderColor = "var(--gold)";
+        
+        setTimeout(() => {
+            input.placeholder = originalPlaceholder;
+            input.style.borderColor = "";
+        }, 1500);
+    } catch (err) {
+        console.error("Error al copiar:", err);
+        goldAlert({
+            title: "ERROR",
+            text: "No se pudo copiar al portapapeles",
+            icon: "❌"
+        });
     }
 }
 
@@ -4034,9 +4571,11 @@ async function guardarLinkEpisodio() {
             confirmText: "SIGUIENTE"
         });
 
-        // Limpieza de campos
-        document.getElementById('adm-ep-num').value = ""; 
-        document.getElementById('adm-url').value = ""; 
+        // Limpieza de campos e incremento automático del episodio
+        const epNumInput = document.getElementById('adm-ep-num');
+        const currentEp = parseInt(epNumInput.value);
+        epNumInput.value = currentEp + 1; // Incrementar al siguiente episodio
+        document.getElementById('adm-url').value = ""; // Limpiar solo la URL 
         
     } catch (err) {
         console.error("Error al guardar en Supabase:", err.message);
@@ -4052,12 +4591,10 @@ async function guardarLinkEpisodio() {
  * Envía una invitación a otro usuario para ver el anime actual
  */
 async function abrirPromptInvitacionWP() {
-    return goldAlert({ title: "DESACTIVADO", text: "La función Watch Party se encuentra temporalmente inactiva por mantenimiento.", icon: "🚧" });
-    
-    /* CÓDIGO ORIGINAL INACTIVO
     if (!currentAnime) {
         return goldAlert({ title: "ERROR", text: "No hay un anime cargado.", icon: "❌" });
     }
+    
     const invitado = prompt("Ingresa el nombre del usuario al que deseas invitar:");
     if (!invitado) return;
 
@@ -4076,7 +4613,6 @@ async function abrirPromptInvitacionWP() {
         console.error(e);
         goldAlert({title:"ERROR", text: "No se pudo enviar la invitación."});
     }
-    */
 }
 
 async function unirseAWatchPartyDesdeChat(animeId, epNum, hostName) {
