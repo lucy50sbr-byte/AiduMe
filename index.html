@@ -38,14 +38,11 @@
             
             <div id="reg-fields">
     <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-    <div style="position: relative; width: 90%; margin: 0 auto 10px auto; display: flex; align-items: center;">
-    <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" 
-           style="width: 100%; padding: 12px 45px 12px 12px; border-radius: 10px; border: none; box-sizing: border-box;">
-    <button type="button" id="toggle-reg-pass" 
-            style="position: absolute; right: 12px; background: none; border: none; color: #888; cursor: pointer; font-size: 1.1rem; padding: 0; display: flex; align-items: center;">
-        👁️
-    </button>
-</div>
+    <div class="password-wrapper">
+        <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 100%; padding: 12px; border-radius: 10px; border: none; box-sizing: border-box;">
+        <span id="toggle-reg-pass" class="password-toggle-eye">👁️</span>
+    </div>
+    
     <input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
     
     <input type="number" id="reg-age" placeholder="Tu Edad" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 20px; border-radius: 10px; border: none; display: none;">
@@ -127,13 +124,20 @@
             </div>
         </div>
 
+        <!--<div id="seccion-continuar-viendo" style="display:none;">
+    <div class="section-header-gold">
+        <h2 class="section-h">🎬 Continuar Viendo</h2>
+    </div>
+    <div id="lista-continuar-viendo" class="continuar-viendo-grid"></div>
+</div>-->
+
         <div id="seccion-top-10">
     <div class="section-header-gold">
         <h2 class="section-h">Top 10 mas vistos de la temporada</h2>
     </div>
     <div class="scroll-wrapper">
-        <div class="horizontal-scroll" id="lista"></div>
-        <button class="scroll-arrow-overlay" onclick="scrollSection('lista')">❯</button>
+        <div class="horizontal-scroll" id="lista-top-10"></div>
+        <button class="scroll-arrow-overlay" onclick="scrollSection('lista-top-10')">❯</button>
     </div>
 </div>
 
@@ -193,7 +197,7 @@
             <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
             <div class="stat-item"><span class="stat-label">Miembro desde</span><span class="stat-value" id="stat-horas">--</span></div>
             <div class="stat-item clickable-stat" onclick="mostrarInfoFichas()"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
-        <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
+            <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
         </div>
 
         <div class="inner-badges-box">
@@ -268,11 +272,11 @@
     <div class="modal-gold-card">
         <h3 class="section-title-gold centered">🛡️ CÓDIGO DE HONOR AIDUME</h3>
         <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 300px; overflow-y: auto; padding-right: 10px;">
-            <p>✨ <b>Respeto ante todo:</b> La comunidad la hacemos todos. Se prohíben insultos, acoso o actitudes tóxicas hacia otros usuarios. Tratemos a los demás como nos gustaría que nos traten.</p>
-            <p>🚫 <b>Zona Libre de Spoilers:</b> No arruines la experiencia ajena. Si vas a comentar algo importante de la trama, usa advertencias claras. ¡Mantengamos el misterio vivo!</p>
-            <p>⚖️ <b>Uso Responsable de Reportes:</b> El sistema de reportes es para mantener la paz, no para bromas. Los reportes falsos resultarán en la suspensión inmediata de tu cuenta.</p>
-            <p>👑 <b>Palabra de Administrador:</b> Nuestros moderadores velan por la seguridad de todos. Sus decisiones y criterios son definitivos para mantener el orden.</p>
-            <p>🌟 <b>Disfruta la Experiencia:</b> AiduMe es un espacio para fans. Comparte, disfruta tus animes favoritos y ayuda a que la comunidad crezca.</p>
+            <p>🤝 <b>Respeto en el Servidor:</b> La comunidad la hacemos todos. Se prohíben insultos, acoso o actitudes tóxicas hacia otros usuarios. Tratemos a los demás como nos gustaría que nos traten para mantener el gremio activo.</p>
+            <p>🙈 <b>Zona Libre de Spoilers:</b> No le arruines la experiencia ajena. Si vas a comentar detalles clave de la trama o el desenlace de un episodio, usa advertencias claras. ¡Mantengamos el misterio vivo!</p>
+            <p>⚖️ <b>Uso Responsable de Reportes:</b> El sistema de reportes es para mantener la paz, no para bromas. El abuso de reportes falsos resultará en la suspensión inmediata de tu cuenta y la pérdida de tus Aiduchas.</p>
+            <p>👑 <b>Palabra de Administrador:</b> Nuestros moderadores velan por la seguridad de todos. Sus decisiones y criterios de moderación son definitivos para mantener el orden en el sistema.</p>
+            <p>🌟 <b>Disfruta el Viaje:</b> AiduMe es un espacio para fans. Comparte, disfruta de tus animes favoritos, sube de rango y ayuda a que la comunidad crezca cada día más.</p>
         </div>
         <button onclick="cerrarModalNormas()" class="action-btn" style="margin-top: 20px;">ENTENDIDO</button>
     </div>
@@ -521,8 +525,7 @@
                 <div class="modern-input-group" style="display: flex; gap: 10px; margin-bottom: 15px;">
                     <button class="emoji-trigger" onclick="toggleEmojiPicker('comment-input', this)"><img src="300.png" alt=""></button>
                     <button class="emoji-trigger" onclick="toggleStickerPicker('comment-input', this)"><img src="301.png" alt=""></button>
-                    <input type="text" id="comment-input" placeholder="¿Qué opinas de este anime?" 
-                           style="flex: 1; padding: 10px; border-radius: 8px; border: none; background: rgba(255,255,255,0.1); color: white; outline: none;">
+                    <input type="text" id="comment-input" placeholder="¿Qué opinas? (Usa /spoiler para ocultar detalles de la trama)" ...>
                     <button onclick="postearComentario()" style="background: var(--gold); border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; color: black;">
                         Enviar
                     </button>
@@ -622,11 +625,11 @@
     <div class="modal-gold-card">
         <h3 class="section-title-gold centered">🛡️ CÓDIGO DE HONOR AIDUME</h3>
         <div style="color: #eee; font-size: 0.85rem; line-height: 1.6; max-height: 250px; overflow-y: auto; padding-right: 10px; margin-bottom: 20px;">
-            <p>✨ <b>Respeto ante todo:</b> Prohibidos los insultos, acoso o actitudes tóxicas.</p>
-            <p>🚫 <b>Zona Libre de Spoilers:</b> No arruines la experiencia ajena. Usa advertencias claras.</p>
-            <p>⚖️ <b>Uso Responsable de Reportes:</b> Reportes falsos o malintencionados causan baneo.</p>
-            <p>👑 <b>Palabra de Administrador:</b> Las decisiones de moderadores son definitivas.</p>
-            <p>🌟 <b>Disfruta la Experiencia:</b> Comparte y disfruta en un espacio sano para fans.</p>
+            <p>🤝 <b>Respeto en el Servidor:</b> La comunidad la hacemos todos. Se prohíben insultos, acoso o actitudes tóxicas hacia otros usuarios. Tratemos a los demás como nos gustaría que nos traten para mantener el gremio activo.</p>
+            <p>🙈 <b>Zona Libre de Spoilers:</b> No le arruines la experiencia ajena. Si vas a comentar detalles clave de la trama o el desenlace de un episodio, usa advertencias claras. ¡Mantengamos el misterio vivo!</p>
+            <p>⚖️ <b>Uso Responsable de Reportes:</b> El sistema de reportes es para mantener la paz, no para bromas. El abuso de reportes falsos resultará en la suspensión inmediata de tu cuenta y la pérdida de tus Aiduchas.</p>
+            <p>👑 <b>Palabra de Administrador:</b> Nuestros moderadores velan por la seguridad de todos. Sus decisiones y criterios de moderación son definitivos para mantener el orden en el sistema.</p>
+            <p>🌟 <b>Disfruta el Viaje:</b> AiduMe es un espacio para fans. Comparte, disfruta de tus animes favoritos, sube de rango y ayuda a que la comunidad crezca cada día más.</p>
         </div>
         <div style="display:flex; gap:10px;">
             <button onclick="aceptarNormasRegistro()" class="btn-filter-flv" style="flex:1;">ACEPTO</button>

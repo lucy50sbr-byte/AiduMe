@@ -1,4 +1,7 @@
 let currentAnime = null;
+let playbackStartTime = 0;
+let progresoIntervalGlobal = null; // Para limpiar intervalos anteriores al cambiar de video
+
 let duelAnimes = [];
 let paginaActualTodos = 1;
 let idiomaActual = 'sub';
@@ -319,7 +322,7 @@ async function initApp() {
     currentDayString = getTodayString(); // Initialize current day string
     await cargarDuelo();
     cargarHome();
-    renderContinuarViendo(); // Cargar sección "Continuar viendo"
+    cargarSeccionContinuarViendo(); // Cargar sección "Continuar viendo"
     cargarUltimosEpisodios();
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
@@ -440,64 +443,55 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function cargarHome() {
-    const lista = document.getElementById('lista');
+    const lista = document.getElementById('lista-top-10');
     if (!lista) return;
 
     try {
-        // 1. Traer TODOS los perfiles y sumar los log_vistos para contar por anime
-        const { data: perfiles, error } = await _db
-            .from('perfiles')
-            .select('log_vistos');
-
+        // 1. Obtenemos todos los registros de la tabla relacional limpia
+        const { data: registrosVistos, error } = await _db
+            .from('vistos')
+            .select('anime_id');
+        
         if (error) throw error;
 
-        if (!perfiles || perfiles.length === 0) {
-            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
+        if (!registrosVistos || registrosVistos.length === 0) {
+            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px; width:100%;">Aún no hay datos de visualización.</p>';
             return;
         }
 
-        // 2. Contar vistas por anime_id sumando los arrays de cada perfil
-        const conteo = {};
-        perfiles.forEach(p => {
-            const log = p.log_vistos || {};
-            for (const animeId in log) {
-                const eps = log[animeId];
-                if (Array.isArray(eps)) {
-                    conteo[animeId] = (conteo[animeId] || 0) + eps.length;
-                }
-            }
+        // 2. Contamos cuántas veces se vio cada anime_id
+        const conteoVistas = {};
+        registrosVistos.forEach(reg => {
+            const id = reg.anime_id;
+            if (!id) return;
+            conteoVistas[id] = (conteoVistas[id] || 0) + 1;
         });
 
-        if (Object.keys(conteo).length === 0) {
-            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
+        // 3. Ordenamos y tomamos los 10 IDs más vistos
+        const top10Ids = Object.keys(conteoVistas)
+            .sort((a, b) => conteoVistas[b] - conteoVistas[a])
+            .slice(0, 10)
+            .map(id => parseInt(id));
+
+        // 4. Obtenemos la metadata usando la caché (¡Súper rápido!)
+        const metadataMap = await fetchJikanBatchConCache(top10Ids);
+
+        // 5. Construimos la lista final con los animes que logramos resolver
+        const top10Animes = top10Ids
+            .filter(id => metadataMap[id])
+            .map(id => metadataMap[id]);
+
+        if (top10Animes.length === 0) {
+            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px; width:100%;">Aún no hay datos de visualización.</p>';
             return;
         }
 
-        // 3. Ordenar por cantidad de vistas (mayor a menor) y tomar top 10
-        const top10Ids = Object.entries(conteo)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(e => parseInt(e[0]));
-
-        // 4. Obtener metadata en paralelo por lotes (RÁPIDO)
-        const metadataMap = await fetchJikanBatch(top10Ids);
-        const animes = top10Ids
-            .filter(id => metadataMap[id])
-            .map(id => {
-                const data = { ...metadataMap[id] };
-                data._viewCount = conteo[id];
-                return data;
-            });
-
-        if (animes.length > 0) {
-            renderGrid(animes, 'lista');
-        } else {
-            lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los animes más vistos.</p>';
-        }
+        // 6. Renderizamos en la UI
+        renderGrid(top10Animes, 'lista-top-10');
 
     } catch (e) {
-        console.error("Error en cargarHome:", e);
-        lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
+        console.error("Error al cargar el home:", e);
+        lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem; width:100%;">⚠️ No pudimos cargar los animes.</p>';
     }
 }
 
@@ -575,25 +569,42 @@ async function renderContinuarViendo() {
     const seccion = document.getElementById('seccion-continuar-viendo');
     const lista = document.getElementById('lista-continuar-viendo');
     
-    if (!seccion || !lista) return;
+    if (!seccion || !lista) {
+        console.log("❌ [Continuar Viendo] No se encontraron los elementos HTML.");
+        return;
+    }
     
+    console.log("🔄 [Continuar Viendo] Iniciando render...");
     const progresoData = await cargarContinuarViendo();
     
+    console.log("📊 [Continuar Viendo] Datos recibidos de la DB:", progresoData);
+    
     if (!progresoData || progresoData.length === 0) {
+        console.log("⚠️ [Continuar Viendo] Como progresoData está vacío, ocultamos la sección.");
         seccion.style.display = 'none';
         return;
     }
     
     seccion.style.display = 'block';
     lista.innerHTML = '';
-    
-    // Obtener detalles de los animes
-    for (const item of progresoData) {
-        try {
-            const res = await fetch(`https://api.jikan.moe/v4/anime/${item.anime_id}`);
-            const animeData = await res.json();
-            const anime = animeData.data;
+
+    try {
+        const ids = progresoData.map(item => parseInt(item.anime_id));
+        console.log("🆔 [Continuar Viendo] IDs a consultar a la caché:", ids);
+
+        const metadataMap = await fetchJikanBatchConCache(ids);
+        console.log("📦 [Continuar Viendo] Metadata obtenida de la caché:", metadataMap);
+        
+        let rendersExitosos = 0;
+
+        progresoData.forEach(item => {
+            const anime = metadataMap[item.anime_id];
             
+            if (!anime) {
+                console.warn(`⚠️ [Continuar Viendo] No se encontró metadata para el anime ID: ${item.anime_id}`);
+                return; 
+            }
+
             const div = document.createElement('div');
             div.className = 'card';
             div.onclick = () => showDetails(anime);
@@ -601,21 +612,36 @@ async function renderContinuarViendo() {
             const minutos = Math.floor(item.progreso_segundos / 60);
             const tiempoTexto = minutos > 0 ? `${minutos} min` : `${item.progreso_segundos}s`;
             
+            const imgUrl = anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || 'placeholder.png';
+            const titleEs = anime.titles ? anime.titles.find(t => t.type === 'Spanish')?.title : null;
+            const nombreMostrar = titleEs || anime.title || "Sin título";
+
             div.innerHTML = `
-                <div class="card-img" style="background-image: url('${anime.images.jpg.large_image_url}');">
+                <div class="card-img" style="background-image: url('${imgUrl}');">
                     <div class="progreso-badge" style="position: absolute; bottom: 5px; right: 5px; background: rgba(255,215,0,0.9); color: #000; padding: 3px 8px; border-radius: 5px; font-size: 0.7rem; font-weight: bold;">
                         Ep ${item.episodio_num} • ${tiempoTexto}
                     </div>
                 </div>
                 <div class="card-info">
-                    <h3 class="card-title">${anime.title}</h3>
+                    <h3 class="card-title">${nombreMostrar}</h3>
                 </div>
             `;
             
             lista.appendChild(div);
-        } catch (err) {
-            console.error("Error al cargar anime para continuar viendo:", err);
+            rendersExitosos++;
+        });
+
+        console.log(`✅ [Continuar Viendo] Se renderizaron con éxito ${rendersExitosos} animes.`);
+
+        // Si no logramos renderizar ninguno porque la metadata falló para todos
+        if (rendersExitosos === 0) {
+            console.log("⚠️ [Continuar Viendo] 0 animes renderizados. Ocultando sección.");
+            seccion.style.display = 'none';
         }
+
+    } catch (error) {
+        console.error("🚨 [Continuar Viendo] Error crítico durante el renderizado:", error);
+        seccion.style.display = 'none';
     }
 }
 
@@ -652,7 +678,7 @@ async function showDetails(a) {
     const titleContainer = document.getElementById('dt-title');
     if (titleContainer) {
         const profileData = JSON.parse(localStorage.getItem('aidume_profile'));
-        if (profileData && (profileData.rol === 'dueño' || profileData.rol === 'admin')) {
+        if (profileData && (profileData.rol === 'dueño' || profileData.rol === 'admin' || profileData.rol === 'moderador')) {
             titleContainer.innerHTML = `${nombreFinal} <span style="font-size:0.8rem; color:var(--gold); opacity:0.7; margin-left:10px;">(ID: ${a.mal_id})</span>`;
         } else {
             titleContainer.innerText = nombreFinal;
@@ -807,7 +833,7 @@ async function showDetails(a) {
 }
 
 async function reportarFalla(numEpisodio, nombreAnime) {
-    // 1. Detectar idioma (tu lógica actual)
+    // 1. Detectar idioma
     const botones = Array.from(document.querySelectorAll('button'));
     const btnLatino = botones.find(b => b.innerText.includes('LATINO'));
     
@@ -819,7 +845,7 @@ async function reportarFalla(numEpisodio, nombreAnime) {
 
     const idiomaActual = esLatinoActivo ? 'Latino' : 'Subtitulado';
 
-    // --- REEMPLAZO DEL CONFIRM POR GOLD ALERT ---
+    // Confirmación
     const confirmar = await goldAlert({
         title: "REPORTAR FALLA",
         text: `¿Reportar el episodio ${numEpisodio} (${idiomaActual}) de "${nombreAnime}" como caído?`,
@@ -831,20 +857,22 @@ async function reportarFalla(numEpisodio, nombreAnime) {
     if (!confirmar) return;
 
     try {
+        // Guardamos todo en la tabla única 'reportes'
         const { error } = await _db
-            .from('reportes_episodios')
+            .from('reportes')
             .insert([{
-                usuario: currentUser,
+                tipo: 'episodio',
+                usuario_reporta: currentUser,
                 anime_id: currentAnime.mal_id,
                 anime_nombre: nombreAnime,
                 episodio: numEpisodio,
                 idioma: idiomaActual,
+                motivo: `Episodio ${numEpisodio} (${idiomaActual}) reportado como caído.`,
                 fecha: new Date().toISOString()
             }]);
 
         if (error) throw error;
 
-        // --- REEMPLAZO DEL ALERT DE ÉXITO ---
         goldAlert({
             title: "ENVIADO",
             text: `El reporte del episodio ${numEpisodio} (${idiomaActual}) ha sido enviado. ¡Gracias por ayudar!`,
@@ -853,9 +881,7 @@ async function reportarFalla(numEpisodio, nombreAnime) {
         });
 
     } catch (err) {
-        console.error("Error al reportar:", err);
-        
-        // --- REEMPLAZO DEL ALERT DE ERROR ---
+        console.error("Error al reportar episodio:", err);
         goldAlert({
             title: "ERROR",
             text: "No pudimos enviar el reporte en este momento. Inténtalo más tarde.",
@@ -2005,7 +2031,7 @@ async function cargarDuelo() {
 async function actualizarMarcadorGlobal() {
     const todayString = getTodayString(); // Use daily string
     const profileData = JSON.parse(localStorage.getItem('aidume_profile'));
-    const isAdmin = profileData && (profileData.rol === 'dueño' || profileData.rol === 'admin');
+    const isAdmin = profileData && (profileData.rol === 'dueño' || profileData.rol === 'admin' || profileData.rol === 'moderador');
 
     for (let i = 0; i < 2; i++) {
         const { count, error } = await _db
@@ -2697,35 +2723,39 @@ async function toggleLikeComentario(comentarioId) {
     }
 
     try {
-        // 1. Verificar si ya existe el like
-        const { data: existente } = await _db
-            .from('comentarios_likes')
-            .select('id')
-            .eq('comentario_id', comentarioId)
-            .eq('usuario', currentUser)
-            .maybeSingle();
+        // 1. Obtener la lista actual de likes de este comentario
+        const { data, error: fetchError } = await _db
+            .from('comentarios')
+            .select('likes_usuarios')
+            .eq('id', comentarioId)
+            .single();
 
-        if (existente) {
-            // 2. Ya dio like → quitarlo
-            const { error } = await _db
-                .from('comentarios_likes')
-                .delete()
-                .eq('id', existente.id);
+        if (fetchError) throw fetchError;
 
-            if (error) throw error;
-            return false; // Ya no tiene like
+        // Nos aseguramos de tener un array vacío si por alguna razón viene null
+        let likes = data?.likes_usuarios || [];
+        const yaDioLike = likes.includes(currentUser);
+        let nuevosLikes;
+
+        if (yaDioLike) {
+            // 2. Ya dio like → filtrar el array para quitar al usuario actual
+            nuevosLikes = likes.filter(usuario => usuario !== currentUser);
         } else {
-            // 3. No tiene like → agregarlo
-            const { error } = await _db
-                .from('comentarios_likes')
-                .insert([{
-                    comentario_id: comentarioId,
-                    usuario: currentUser
-                }]);
-
-            if (error) throw error;
-            return true; // Ahora tiene like
+            // 3. No tiene like → agregarlo al array
+            nuevosLikes = [...likes, currentUser];
         }
+
+        // 4. Actualizar la fila del comentario con el nuevo array de likes
+        const { error: updateError } = await _db
+            .from('comentarios')
+            .update({ likes_usuarios: nuevosLikes })
+            .eq('id', comentarioId);
+
+        if (updateError) throw updateError;
+
+        // Retorna true si ahora tiene like (se agregó), o false si se quitó
+        return !yaDioLike; 
+
     } catch (err) {
         console.error("Error en toggleLikeComentario:", err);
         goldAlert({ title: "ERROR", text: "No se pudo procesar el like.", icon: "❌" });
@@ -2738,36 +2768,93 @@ async function toggleLikeComentario(comentarioId) {
  */
 async function obtenerEstadoLikes(comentarioId) {
     try {
-        const { count } = await _db
-            .from('comentarios_likes')
-            .select('*', { count: 'exact', head: true })
-            .eq('comentario_id', comentarioId);
+        // Traemos únicamente la columna de likes del comentario específico
+        const { data, error } = await _db
+            .from('comentarios')
+            .select('likes_usuarios')
+            .eq('id', comentarioId)
+            .single();
 
-        let usuarioDioLike = false;
-        if (currentUser) {
-            const { data: miLike } = await _db
-                .from('comentarios_likes')
-                .select('id')
-                .eq('comentario_id', comentarioId)
-                .eq('usuario', currentUser)
-                .maybeSingle();
-            usuarioDioLike = !!miLike;
-        }
+        if (error) throw error;
 
-        return { conteo: count || 0, usuarioDioLike };
+        const likes = data?.likes_usuarios || [];
+        const conteo = likes.length;
+        const usuarioDioLike = currentUser ? likes.includes(currentUser) : false;
+
+        return { conteo, usuarioDioLike };
     } catch (err) {
         console.error("Error en obtenerEstadoLikes:", err);
         return { conteo: 0, usuarioDioLike: false };
     }
 }
 
+// ==========================================
+// DETECTOR DE SPOILERS (SIN MODIFICAR TABLAS)
+// ==========================================
+
+const PALABRAS_SPOILER = [
+    "muere", "muera", "muerto", "murio", "morira", "mueran",
+    "fallece", "fallecio", "palma", "palmo", "perece", "perecio",
+    "asesinado", "asesinar", "asesino", "mato", "mata", "matan",
+    "ejecutado", "ejecutan", "decapitado", "desmembrado", "sacrificio", "sacrifica",
+    "suicida", "suicido", "se suicida", "cadaver", "tumba",
+    "traiciona", "traicion", "traidor", "impostor", "infiltrado",
+    "verdadero padre", "verdadera madre", "hermano de", "hermana de", "hijo de",
+    "identidad", "en realidad es", "resulta ser", "es el rey", "es el jefe",
+    "villano", "antagonista", "el malo", "culpable", "identidad oculta",
+    "mente maestra", "doble agente", "espia",
+    "revive", "resucita", "resucito", "reencarna", "reencarno",
+    "pierde el poder", "se queda ciego", "pierde un brazo", "pierde la pierna",
+    "desaparece", "se transforma", "nueva forma", "despierta el", "despertar",
+    "gear 5", "power up", "evolucion", "se vuelve malo", "se corrompe",
+    "posesion", "poseido", "controla su cuerpo", "fusion",
+    "en el manga", "en la novela", "el manga", "la novela", "spoiler", "spoilers",
+    "adelanto", "lei que", "leí el", "ya salio el", "capitulo del manga", 
+    "scan", "scans", "leaks", "filtraciones", "filtracion", "al final del", 
+    "en el final", "fin del manga", "se quedan juntos", "terminan juntos", 
+    "se besan", "se le declara", "lo rechaza", "la rechaza", "se casa con", 
+    "se casan", "tienen un hijo", "rompen", "se separan"
+];
+
+function verificarTextoSpoiler(texto) {
+    if (!texto) return { contiene: false, palabra: null };
+    
+    // Convertimos a minúsculas y limpiamos tildes/acentos
+    const textoLimpio = texto
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    for (const palabra of PALABRAS_SPOILER) {
+        const regex = new RegExp(`\\b${palabra}\\b`, 'i');
+        if (regex.test(textoLimpio)) {
+            return { contiene: true, palabra: palabra };
+        }
+    }
+    return { contiene: false, palabra: null };
+}
+
+// ==========================================
+// FUNCIÓN PRINCIPAL POSTEAR COMENTARIO
+// ==========================================
+
 async function postearComentario() {
     const input = document.getElementById('comment-input');
     const text = input.value.trim(); 
     if(!text || !currentAnime || !currentUser) return;
 
+    // 🚨 1. VALIDACIÓN DE INSULTOS, OFENSAS Y LINKS
+    if (contieneOfensa(text)) {
+        return goldAlert({
+            title: "CONTENIDO NO PERMITIDO",
+            text: "Tu comentario contiene palabras inapropiadas, insultos o enlaces externos. Por favor, modifícalo para mantener una comunidad sana.",
+            icon: "🚫",
+            confirmText: "CORREGIR"
+        });
+    }
+
     try {
-        // 1. CONSULTAR EL ÚLTIMO COMENTARIO
+        // 2. CONSULTAR EL ÚLTIMO COMENTARIO (Antispam)
         const { data: ultimoComentario, error: errCheck } = await _db
             .from('comentarios')
             .select('fecha')
@@ -2779,7 +2866,7 @@ async function postearComentario() {
 
         if (errCheck) throw errCheck;
 
-        // 2. LÓGICA DE TIEMPO (Antispam)
+        // 3. LÓGICA DE TIEMPO (Antispam)
         if (ultimoComentario) {
             const ahora = new Date();
             const fechaUltimo = new Date(ultimoComentario.fecha);
@@ -2791,7 +2878,6 @@ async function postearComentario() {
                 const horas = Math.floor(minutosRestantes / 60);
                 const mins = minutosRestantes % 60;
 
-                // --- REEMPLAZO POR GOLD ALERT (MODO ESPERA) ---
                 return goldAlert({
                     title: "SISTEMA ANTISPAM",
                     text: `¡Hola! Para evitar el spam, debes esperar ${horas}h ${mins}min antes de volver a comentar en este anime.`,
@@ -2799,6 +2885,26 @@ async function postearComentario() {
                     confirmText: "ENTENDIDO"
                 });
             }
+        }
+
+        // --- VALIDACIÓN DE SPOILERS ---
+        let marcaSpoiler = false;
+        const analisisSpoiler = verificarTextoSpoiler(text);
+
+        if (analisisSpoiler.contiene) {
+            const quiereMarcar = await goldAlert({
+                title: "¡ALERTA DE SPOILER!",
+                text: `Detectamos expresiones sospechosas (palabra: "${analisisSpoiler.palabra}"). ¿Deseas publicarlo protegido como spoiler para la comunidad?`,
+                icon: "⚠️",
+                showCancel: true,
+                confirmText: "SÍ, PUBLICAR",
+                cancelText: "CANCELAR"
+            });
+
+            // Si el usuario cancela porque prefiere reescribirlo, detenemos la ejecución
+            if (!quiereMarcar) return; 
+            
+            marcaSpoiler = true;
         }
 
         // --- OBTENER EL AVATAR ACTUAL DEL PERFIL ---
@@ -2810,13 +2916,17 @@ async function postearComentario() {
 
         const miAvatarId = perfil ? perfil.avatar_id : '1';
 
-        // 3. ENVIAR COMENTARIO
+        // --- PREPARAR EL TEXTO FINAL ---
+        // Si tiene spoiler, le concatenamos la advertencia al string original
+        const textoFinal = marcaSpoiler ? `[SPOILER ALERT] 🙈: ${text}` : text;
+
+        // 4. ENVIAR COMENTARIO (Mantiene intacta tu estructura original de Supabase)
         const { error: errInsert } = await _db
             .from('comentarios')
             .insert([{ 
                 anime_id: currentAnime.mal_id, 
                 usuario: currentUser, 
-                comentario: text,
+                comentario: textoFinal, 
                 avatar_id: miAvatarId
             }]);
 
@@ -2825,19 +2935,19 @@ async function postearComentario() {
         input.value = "";
         cargarComentarios(currentAnime.mal_id);
 
-        // --- REEMPLAZO POR GOLD ALERT (ÉXITO) ---
-        goldAlert({
-            title: "¡LOGRO DESBLOQUEADO!",
-            text: "Tu comentario ha sido publicado con éxito. ¡Gracias por compartir tu opinión!",
-            icon: "💬",
+        await goldAlert({
+            title: marcaSpoiler ? "SPOILER PUBLICADO" : "¡COMENTARIO PUBLICADO!",
+            text: marcaSpoiler 
+                ? "Tu comentario se publicó anteponiendo la advertencia de spoiler." 
+                : "Tu mensaje ha sido publicado con éxito en la comunidad.",
+            icon: marcaSpoiler ? "🙈" : "💬",
             confirmText: "GENIAL"
         });
         
     } catch (err) {
         console.error("Error al comentar:", err.message);
         
-        // --- REEMPLAZO POR GOLD ALERT (ERROR) ---
-        goldAlert({
+        await goldAlert({
             title: "UPS...",
             text: "Hubo un error al publicar tu comentario. Revisa tu conexión.",
             icon: "❌"
@@ -2846,6 +2956,45 @@ async function postearComentario() {
 }
 
 
+// --- 1. PROCESADOR DE TEXTO INTEGRADO (SPOILERS MÉTODOS MANUAL Y AUTOMÁTICO) ---
+function procesarTextoComentario(texto) {
+    if (!texto) return "";
+
+    let esSpoiler = false;
+    let textoReal = texto;
+
+    // Detectamos si viene del flujo automático o del comando manual anterior
+    if (texto.startsWith("[SPOILER ALERT] 🙈:")) {
+        esSpoiler = true;
+        textoReal = texto.replace("[SPOILER ALERT] 🙈:", "").trim();
+    } else if (texto.startsWith('/spoiler')) {
+        esSpoiler = true;
+        textoReal = texto.replace(/^\/spoiler\s*/i, '').trim();
+    }
+
+    // Si es spoiler, envolvemos el texto estructurado con tu CSS de peligro
+    if (esSpoiler) {
+        // Procesamos stickers y emojis dentro del contenido del spoiler
+        const textoConStickers = parsearMensajeParaStickers(textoReal);
+        
+        return `
+            <div class="spoiler-container" onclick="this.classList.toggle('revealed')">
+                <div class="spoiler-overlay">
+                    <span class="spoiler-badge">⚠️ SPOILER ALERT (Click para revelar)</span>
+                </div>
+                <div class="spoiler-text">
+                    ${textoConStickers}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Si es un comentario normal, lo procesamos directo con tu parseador de stickers
+    return parsearMensajeParaStickers(texto);
+}
+
+// --- 2. CARGADOR DE COMENTARIOS ORIGINAL ---
+// --- 1. CARGADOR DE COMENTARIOS (Llama con "await" al renderizador) ---
 async function cargarComentarios(id) {
     const list = document.getElementById('lista-comentarios');
     if (!list) return; 
@@ -2863,7 +3012,7 @@ async function cargarComentarios(id) {
             console.error("Error con el vínculo de perfiles:", error.message);
             // Si falla el JOIN, intentamos cargar solo los comentarios sin perfiles
             const { data: backup } = await _db.from('comentarios').select('*').eq('anime_id', id).order('fecha', { ascending: false });
-            if (backup) renderizarComentarios(backup, list);
+            if (backup) await renderizarComentarios(backup, list);
             return;
         }
 
@@ -2872,7 +3021,8 @@ async function cargarComentarios(id) {
             return;
         }
 
-        renderizarComentarios(c, list);
+        // Importante: Agregamos el "await" acá para esperar que termine de renderizar ordenadamente
+        await renderizarComentarios(c, list);
 
     } catch (err) {
         console.error("Error fatal en comentarios:", err.message);
@@ -2880,59 +3030,78 @@ async function cargarComentarios(id) {
     }
 }
 
-// Función auxiliar para dibujar los comentarios en la pantalla
-function renderizarComentarios(comentarios, contenedor) {
+// --- 2. RENDERIZADOR DE COMENTARIOS ASÍNCRONO ORDENADO ---
+async function renderizarComentarios(comentarios, contenedor) {
+    contenedor.innerHTML = ""; // Limpiamos el contenedor por seguridad
     const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
     
-    comentarios.forEach(async (x) => { 
-        const d = document.createElement('div'); 
-        d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
-        d.id = `comentario-${x.id}`;
-        
-        // LÓGICA DE ACTUALIZACIÓN AUTOMÁTICA: 
-        // Priorizamos el avatar del perfil (perfiles.avatar_id) sobre el guardado en el comentario
-        const perfilData = Array.isArray(x.perfiles) ? x.perfiles[0] : x.perfiles;
-        // Si perfilData existe, usamos SU avatar_id (el nuevo). Si no, usamos el del comentario como respaldo.
-        const avId = (perfilData && perfilData.avatar_id) ? perfilData.avatar_id : (x.avatar_id || '1');
-        const esPremium = perfilData?.es_premium || false;
-        const av = todosLosAvatares.find(a => a.id === String(avId));
-        const urlAvatar = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${x.usuario}`;
+    try {
+        // 1. Traemos los likes de TODOS los comentarios en paralelo antes de renderizar nada
+        const comentariosConLikes = await Promise.all(
+            comentarios.map(async (x) => {
+                const estado = await obtenerEstadoLikes(x.id);
+                return { 
+                    ...x, 
+                    conteo: estado.conteo, 
+                    usuarioDioLike: estado.usuarioDioLike 
+                };
+            })
+        );
 
-        // Obtener estado de likes para este comentario
-        const { conteo, usuarioDioLike } = await obtenerEstadoLikes(x.id);
-        const likeClass = usuarioDioLike ? 'like-btn-active' : 'like-btn-inactive';
-        const likeIcon = usuarioDioLike ? '❤️' : '🤍';
+        // 2. Ahora que tenemos toda la data junta, renderizamos de forma 100% sincrónica para blindar el orden
+        comentariosConLikes.forEach((x) => { 
+            const d = document.createElement('div'); 
+            d.style = "background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 12px; border-left: 4px solid var(--gold); margin-bottom: 10px; width: 100%; box-sizing: border-box;"; 
+            d.id = `comentario-${x.id}`;
+            
+            // LÓGICA DE ACTUALIZACIÓN AUTOMÁTICA DE AVATAR: 
+            const perfilData = Array.isArray(x.perfiles) ? x.perfiles[0] : x.perfiles;
+            const avId = (perfilData && perfilData.avatar_id) ? perfilData.avatar_id : (x.avatar_id || '1');
+            const esPremium = perfilData?.es_premium || false;
+            const av = todosLosAvatares.find(a => a.id === String(avId));
+            const urlAvatar = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${x.usuario}`;
 
-        d.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
-                <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
-                     style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid ${esPremium ? 'var(--gold)' : '#333'}; background: #111; cursor: pointer; object-fit: cover;">
-                <div style="flex: 1;">
-                    <strong class="go-to-profile" data-user="${x.usuario}"
-                            style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
-                        @${x.usuario} ${esPremium ? '👑' : ''}
-                    </strong>
-                    <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word;">${parsearMensajeParaStickers(x.comentario)}</span>
-                    
-                    <!-- BOTÓN DE LIKE -->
-                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                        <button onclick="toggleLikeComentarioUI(${x.id})" 
-                                class="like-btn ${likeClass}"
-                                style="background:none; border:none; cursor:pointer; font-size:0.9rem; padding: 2px 4px; border-radius: 6px; transition: 0.2s; display: flex; align-items: center; gap: 4px;">
-                            <span class="like-icon">${likeIcon}</span>
-                            <span class="like-count" style="font-size:0.75rem; color: ${usuarioDioLike ? '#ff4757' : '#888'}; font-weight: bold;">${conteo}</span>
-                        </button>
+            const likeClass = x.usuarioDioLike ? 'like-btn-active' : 'like-btn-inactive';
+            const likeIcon = x.usuarioDioLike ? '❤️' : '🤍';
+
+            d.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
+                    <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
+                         style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid ${esPremium ? 'var(--gold)' : '#333'}; background: #111; cursor: pointer; object-fit: cover;">
+                    <div style="flex: 1;">
+                        <strong class="go-to-profile" data-user="${x.usuario}"
+                                style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
+                            @${x.usuario} ${esPremium ? '👑' : ''}
+                        </strong>
+                        <!-- PROCESADO INTERACTIVO DE SPOILERS Y STICKERS -->
+                        <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word; display: block; width: 100%; margin-top: 4px;">
+                            ${procesarTextoComentario(x.comentario)}
+                        </span>
+                        
+                        <!-- BOTÓN DE LIKE -->
+                        <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                            <button onclick="toggleLikeComentarioUI(${x.id})" 
+                                    class="like-btn ${likeClass}"
+                                    style="background:none; border:none; cursor:pointer; font-size:0.9rem; padding: 2px 4px; border-radius: 6px; transition: 0.2s; display: flex; align-items: center; gap: 4px;">
+                                <span class="like-icon">${likeIcon}</span>
+                                <span class="like-count" style="font-size:0.75rem; color: ${x.usuarioDioLike ? '#ff4757' : '#888'}; font-weight: bold;">${x.conteo}</span>
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
-            </div>`; 
+                    <button onclick="reportarComentario(${x.id})" style="background:none; border:none; cursor:pointer; font-size:0.9rem; opacity:0.4;">🚩</button>
+                </div>`; 
 
-        // Vincular el click al perfil
-        d.querySelectorAll('.go-to-profile').forEach(el => {
-            el.onclick = () => verPerfilAjeno(el.getAttribute('data-user'));
+            // Vincular el click al perfil
+            d.querySelectorAll('.go-to-profile').forEach(el => {
+                el.onclick = () => verPerfilAjeno(el.getAttribute('data-user'));
+            });
+            
+            contenedor.appendChild(d);
         });
-        contenedor.appendChild(d);
-    });
+
+    } catch (err) {
+        console.error("Error al renderizar comentarios con likes:", err.message);
+    }
 }
 
 /**
@@ -3697,9 +3866,20 @@ async function aplicarSancion(user, horas) {
             return goldAlert({ title: "SISTEMA REAL", text: "👑 El Dueño es intocable.", icon: "👑" });
         }
 
+        // --- SI EL MODERADOR INTENTA UN BAN PERMANENTE (horas=0), SE LO DENEGAMOS ---
+        const esModerador = (moderador.rol === 'moderador');
+        const esPermanente = (horas === 0);
+
+        if (esModerador && esPermanente) {
+            return goldAlert({ 
+                title: "ACCESO DENEGADO", 
+                text: "🔍 Los Moderadores solo pueden SUSPENDER temporalmente, no pueden aplicar baneos permanentes. Solicita a un Administrador o Dueño si es necesario.", 
+                icon: "🚫" 
+            });
+        }
+
         // --- LÓGICA DE SANCIÓN NORMAL ---
         let fechaBaneo = null;
-        const esPermanente = (horas === 0);
 
         if (!esPermanente) {
             fechaBaneo = new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
@@ -3710,7 +3890,7 @@ async function aplicarSancion(user, horas) {
         // --- PEDIR MOTIVO ANTES DE CONFIRMAR ---
         const motivo = await goldAlert({
             title: "MOTIVO DE LA SANCIÓN",
-            text: `Escribe el motivo por el cual ${esPermanente ? 'baneas permanentemente' : 'suspendes por ' + horas + 'h'} a @${user}.\n\nEste motivo quedará registrado y visible para el moderador.`,
+            text: `Escribe el motivo por el cual ${esPermanente ? 'baneas permanentemente' : 'suspendes por ' + horas + 'h'} a @${user}.\n\nEste motivo quedará registrado y visible para el equipo de moderación.`,
             icon: "📝",
             showInput: true,
             showCancel: true,
@@ -3773,26 +3953,33 @@ async function cargarComentariosAdmin() {
     list.innerHTML = "<p style='text-align:center; opacity:0.5; font-size:0.8rem;'>Analizando y agrupando todos los reportes...</p>";
 
     try {
-        // 1. TRAEMOS REPORTES DE CHAT/ANIME Y REPORTES DE EPISODIOS
-        // Filtramos para traer solo los que NO han sido revisados aún
-        const [resReportes, resEpisodios] = await Promise.all([
-            _db.from('reportes').select('*').eq('revisado', false).order('id', { ascending: false }),
-            _db.from('reportes_episodios').select('*').eq('revisado', false).order('fecha', { ascending: false })
-        ]);
+        // 1. TRAEMOS TODOS LOS REPORTES NO REVISADOS DE LA TABLA ÚNICA
+        const { data: todosLosReportes, error } = await _db
+            .from('reportes')
+            .select('*')
+            .eq('revisado', false)
+            .order('fecha', { ascending: false });
 
-        if (resReportes.error) throw resReportes.error;
-        if (resEpisodios.error) throw resEpisodios.error;
+        if (error) throw error;
 
         list.innerHTML = "";
 
+        if (!todosLosReportes || todosLosReportes.length === 0) {
+            list.innerHTML = "<p style='text-align:center; opacity:0.5;'>No hay reportes de ningún tipo.</p>";
+            return;
+        }
+
+        // Separamos los reportes de episodios de los de chat/comentario
+        const reportesEpisodios = todosLosReportes.filter(r => r.tipo === 'episodio');
+        const reportesSociales = todosLosReportes.filter(r => r.tipo === 'comentario' || r.tipo === 'chat'); // Por si manejas tipo 'chat' explícito
+
         // --- A. RENDERIZADO DE REPORTES DE EPISODIOS (VERDES) ---
-        if (resEpisodios.data && resEpisodios.data.length > 0) {
-           resEpisodios.data.forEach(r => {
-    const divEp = document.createElement('div');
-    // LE ASIGNAMOS UN ID ÚNICO AL DIV PARA PODER BORRARLO LUEGO
-    divEp.id = `reporte-verde-${r.id}`; 
-    
-    divEp.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(0, 255, 100, 0.08); border: 1px solid #00ff64;";
+        if (reportesEpisodios.length > 0) {
+            reportesEpisodios.forEach(r => {
+                const divEp = document.createElement('div');
+                divEp.id = `reporte-verde-${r.id}`; 
+                
+                divEp.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(0, 255, 100, 0.08); border: 1px solid #00ff64;";
                 divEp.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
                         <div style="flex: 1;">
@@ -3806,9 +3993,10 @@ async function cargarComentariosAdmin() {
                             <p style="color:#eee; margin: 3px 0; font-size: 0.9rem;">
                                 Falla detectada en el <strong>Episodio ${r.episodio}</strong>.
                             </p>
-                            <p style="font-size:0.7rem; opacity:0.5;">Reportado por: @${r.usuario} | ID: ${r.anime_id}</p>
+                            <p style="font-size:0.7rem; opacity:0.5;">Reportado por: @${r.usuario_reporta} | ID: ${r.anime_id}</p>
                         </div>
-                        <button onclick="borrarReporteEpisodio(${r.id})" title="Marcar como arreglado"
+                        <!-- Ahora llamamos a borrarGrupoReportes pasándole el ID en un array para marcarlo como revisado -->
+                        <button onclick="borrarGrupoReportes([${r.id}])" title="Marcar como arreglado"
                                 style="background:rgba(0, 255, 100, 0.2); border:1px solid #00ff64; color:white; border-radius:8px; padding:10px; cursor:pointer; font-size:1.1rem;">
                             ✔️
                         </button>
@@ -3818,12 +4006,12 @@ async function cargarComentariosAdmin() {
         }
 
         // --- B. LÓGICA DE AGRUPACIÓN PARA CHAT Y COMENTARIOS ---
-        if (resReportes.data && resReportes.data.length > 0) {
+        if (reportesSociales.length > 0) {
             const grupos = {};
-            for (const r of resReportes.data) {
-                const esChat = (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
+            for (const r of reportesSociales) {
+                // Detectar si es chat (ya sea por el flag 'tipo' o la marca morada en el motivo)
+                const esChat = r.tipo === 'chat' || (r.motivo && r.motivo.includes('[CHAT_PURPLE]')) || !r.comentario_id;
 
-                // Agrupar reportes de chat por el usuario reportado para evitar saturación en el panel
                 let llaveGrupo;
                 if (esChat && r.motivo) {
                     const matchUser = r.motivo.match(/\(Usuario:\s*([^)]+)\)/);
@@ -3862,7 +4050,12 @@ async function cargarComentariosAdmin() {
                     const matchMsj = r.motivo.match(/Mensaje:\s*"([^"]+)"/);
                     textoReportado = matchMsj ? `"${matchMsj[1]}"` : "Mensaje original no capturado";
                 } else if (r.comentario_id) {
-                    const { data: comData } = await _db.from('comentarios').select('usuario, comentario').eq('id', r.comentario_id).maybeSingle();
+                    const { data: comData } = await _db
+                        .from('comentarios')
+                        .select('usuario, comentario')
+                        .eq('id', r.comentario_id)
+                        .maybeSingle();
+
                     if (comData) {
                         usuarioObjetivo = `@${comData.usuario}`;
                         textoReportado = `"${comData.comentario}"`;
@@ -3878,7 +4071,7 @@ async function cargarComentariosAdmin() {
                     d.style = "margin-bottom: 15px; padding: 15px; border-radius: 12px; background: rgba(229, 9, 20, 0.12); border: 1px solid #e50914;";
                 }
 
-                const motivoLimpio = r.motivo ? r.motivo.replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:').replace(/Motivo:\s*/, '').replace(/\| Mensaje:\s*"[^"]*"/, '').replace(/\(Usuario:\s*[^)]+\)/g, '').trim() : "Sin descripción";
+                const motivoLimpio = r.motivo ? r.motivo.replace(/\[CHAT_PURPLE\]/g, '💜 CHAT:').replace(/Motivo:\s*/, '').replace(/| Mensaje:\s*"[^"]*"/, '').replace(/\(Usuario:\s*[^)]+\)/g, '').trim() : "Sin descripción";
                 const listaDenunciantes = grupo.denunciantes.map(u => `@${u}`).join(', ');
 
                 d.innerHTML = `
@@ -3907,10 +4100,6 @@ async function cargarComentariosAdmin() {
                     </div>`;
                 list.appendChild(d);
             }
-        }
-
-        if (list.innerHTML === "") {
-            list.innerHTML = "<p style='text-align:center; opacity:0.5;'>No hay reportes de ningún tipo.</p>";
         }
 
     } catch (err) {
@@ -4040,9 +4229,48 @@ function toggleMotivos(btn, id, todos, cortos) {
     }
 }
 
-// 1. Función para detectar insultos automáticamente
 function contieneOfensa(texto) {
-    const palabras = ["insulto1", "insulto2", "spam"]; // Agrega las tuyas aquí
+    if (!texto) return false;
+
+    // 1. Expresión regular para detectar CUALQUIER tipo de enlace/URL
+    const regexLinks = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|net|org|edu|gov|mil|co|biz|info|me|tv|io|cl|ar|uy|br|ru|ly|gl)(?:\/[^\s]*)?)/gi;
+    
+    if (regexLinks.test(texto)) {
+        return true; 
+    }
+
+    // 2. Lista masiva y ampliada de ofensas
+    const palabras = [
+        // --- Insultos Argentinos y del Cono Sur ---
+        "boludo", "boluda", "pelotudo", "pelotuda", "conchudo", "conchuda", "concha",
+        "forro", "forra", "puto", "puta", "trolazo", "trolo", "trola", "orto", "ojete",
+        "pajero", "pajera", "paja", "culiado", "culiada", "culia", "culio", "chupala",
+        "mame", "mamar", "pendejo", "pendeja", "mierda", "cagar", "cagada", "bosta",
+        "marica", "maricon", "cabron", "cabrona", "pito", "verga", "pija", "carajo",
+        "pijudo", "conchita", "chupaverga", "chupapija", "mameitor", "forrito", "gato",
+        "reputa", "malparido", "malparida", "pajaron", "forrada", "mamerto", "mamerta",
+
+        // --- Insultos Internacionales / Latam / España ---
+        "gilipollas", "coño", "joder", "chinga", "chingar", "chingada", "chingado",
+        "pendejada", "culero", "culera", "mariconazo", "gonorrea", "parce", "carechimba",
+        "hijo de puta", "hija de puta", "hdp", "la tuya", "concha de tu madre", "concha de tu hermana",
+        "putita", "putito", "zorra", "perra", "bastardo", "bastarda", "tarado", "tarada",
+        "imbecil", "estupido", "estupida", "idiota", "bobolo", "pendejito", "pendejita",
+
+        // --- Toxicidad en Comunidades, Gaming y Anime (Descalificaciones y Discriminación) ---
+        "mogolico", "mogolica", "retrasado", "retrasada", "enfermo", "enferma", 
+        "autista", "gordo", "gorda", "negro de", "negra de", "autismo", "cancer",
+        "down", "sindrome", "fracasado", "fracasada", "virgo", "virgacho", "gordofobico",
+        "topo", "manco", "manca", "pt", "pt de mierda", "bobito", "bobita", "lloron",
+        "llorona", "rata", "niño rata", "subnormal", "mongol", "mongolico", "mongolica",
+
+        // --- Spam / Promoción / Estafas ---
+        "seguime en", "mi canal", "mi instagram", "mi twitch", "mi tiktok", 
+        "suscribite", "gana plata", "gana dinero", "hacerse rico", "casino", "apuestas",
+        "telegram", "grupo de", "escribime", "hablame al", "ganancias", "inverti"
+    ];
+
+    // 3. Tu lógica de espaciado (vuelve inmune el filtro a "p.u.t.o", "b_o_l_u_d_o", etc.)
     return palabras.some(p => {
         const patron = p.split('').join('[\\s\\.\\-\\_]*');
         const regex = new RegExp(patron, 'gi');
@@ -4059,7 +4287,7 @@ async function reportarComentario(comId) {
         });
     }
 
-    // 1. --- ADVERTENCIA PREVIA (ESTILO GOLD) ---
+    // 1. Advertencia previa
     const advertencia = await goldAlert({
         title: "AVISO DE MODERACIÓN",
         text: "Reportar comentarios sin un motivo válido o de forma malintencionada puede resultar en la SUSPENSIÓN de tu cuenta.\n\n¿Estás seguro de que este comentario infringe las normas?",
@@ -4071,10 +4299,11 @@ async function reportarComentario(comId) {
     if (!advertencia) return;
 
     try {
-        // 2. Verificar si ya reportó
+        // 2. Verificar si ya reportó este comentario específico
         const { data: yaReportado, error: errCheck } = await _db
             .from('reportes')
             .select('id')
+            .eq('tipo', 'comentario')
             .eq('comentario_id', comId)
             .ilike('usuario_reporta', currentUser)
             .maybeSingle();
@@ -4089,7 +4318,7 @@ async function reportarComentario(comId) {
             });
         }
 
-        // 3. --- PEDIR MOTIVO (REEMPLAZO DEL PROMPT) ---
+        // 3. Pedir motivo
         const motivo = await goldAlert({
             title: "SISTEMA DE MODERACIÓN",
             text: `Escribe el motivo del reporte.\n\n(Tu usuario @${currentUser} quedará vinculado a este reporte).`,
@@ -4100,7 +4329,7 @@ async function reportarComentario(comId) {
         });
         
         if (!motivo || motivo.trim().length < 4) {
-            if (motivo !== null) { // Si no canceló, pero escribió poco
+            if (motivo !== null) {
                 goldAlert({ 
                     title: "MOTIVO INVÁLIDO", 
                     text: "Debes proporcionar un motivo descriptivo para proceder.", 
@@ -4110,16 +4339,17 @@ async function reportarComentario(comId) {
             return;
         }
 
-        // 4. Insertar en Supabase
+        // 4. Insertar en Supabase indicando que es tipo 'comentario'
         const { error: errInsert } = await _db.from('reportes').insert([{
+            tipo: 'comentario',
             comentario_id: comId,
             usuario_reporta: currentUser,
-            motivo: motivo.trim()
+            motivo: motivo.trim(),
+            fecha: new Date().toISOString()
         }]);
 
         if (errInsert) throw errInsert;
 
-        // --- ÉXITO ---
         goldAlert({
             title: "REPORTE RECIBIDO",
             text: "Gracias por ayudar a mantener AiduMe seguro. Nuestro equipo revisará el comentario pronto.",
@@ -4130,7 +4360,7 @@ async function reportarComentario(comId) {
         if (typeof cargarComentariosAdmin === 'function') cargarComentariosAdmin();
 
     } catch (err) {
-        console.error("Error al reportar:", err.message);
+        console.error("Error al reportar comentario:", err.message);
         goldAlert({ title: "ERROR", text: "No pudimos procesar tu reporte.", icon: "❌" });
     }
 }
@@ -4261,8 +4491,11 @@ function cambiarPaginaCompleta(delta) {
     }
 }
 
-async function reproducirEpisodio(titulo, num) {
-    ultimoEpisodioCargado = { titulo, num };
+// ==========================================
+// FUNCIÓN PRINCIPAL DE REPRODUCCIÓN
+// ==========================================
+async function reproducirEpisodio(titulo, num, segundos = 0) {
+    ultimoEpisodioCargado = { titulo, num, segundos };
     const container = document.getElementById('video-player-container');
     const infoText = document.getElementById('video-ep-title');
     
@@ -4368,6 +4601,51 @@ async function reproducirEpisodio(titulo, num) {
             urlFinal = `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(titulo + " episodio " + num + " " + sufijo)}`;
         }
 
+        // ⏱️ AGREGAR TIEMPO DE REANUDACIÓN AL URL
+        if (segundos > 0) {
+            // Los reproductores que usas (nyuu, filemoon, streamhg, vidhide, netu, uqload, streamtape)
+            // son embebidos HTML5. La mayoría soporta el fragmento #t=SEGUNDOS (HTML5 video spec)
+            // o alternativamente el parámetro ?t=SEGUNDOS
+            const separadorHash = urlFinal.includes('#') ? '&' : '#';
+            const separadorQuery = urlFinal.includes('?') ? '&' : '?';
+            
+            // Detectar el dominio para elegir el método correcto
+            const dominio = urlFinal.toLowerCase();
+            
+            if (dominio.includes('youtube.com') || dominio.includes('youtu.be')) {
+                // YouTube: parámetro t=SEGUNDOSs
+                urlFinal += `${separadorQuery}t=${segundos}s`;
+            }
+            else if (dominio.includes('uqload') || dominio.includes('filemoon') || dominio.includes('streamtape')) {
+                // Uqload, Filemoon, Streamtape: soportan #t=SEGUNDOS (HTML5 fragment)
+                urlFinal += `${separadorHash}t=${segundos}`;
+            }
+            else if (dominio.includes('netu') || dominio.includes('netu.tv') || dominio.includes('waaw') || dominio.includes('kaa')) {
+                // Netu/Waaw/Kaa: soportan #t=SEGUNDOS
+                urlFinal += `${separadorHash}t=${segundos}`;
+            }
+            else if (dominio.includes('nyuu') || dominio.includes('streamhg') || dominio.includes('vidhide')) {
+                // Nyuu, StreamHG, VidHide: soportan #t=SEGUNDOS
+                urlFinal += `${separadorHash}t=${segundos}`;
+            }
+            else if (dominio.includes('mp4upload') || dominio.includes('yourupload')) {
+                // Mp4upload y YourUpload: fragmento HTML5
+                urlFinal += `${separadorHash}t=${segundos}`;
+            }
+            else if (dominio.includes('dailymotion.com')) {
+                // Dailymotion: parámetro start=SEGUNDOS
+                urlFinal += `${separadorQuery}start=${segundos}`;
+            }
+            else if (dominio.includes('ok.ru') || dominio.includes('vk.com')) {
+                // OK.ru y VK: parámetro t=SEGUNDOS
+                urlFinal += `${separadorQuery}t=${segundos}`;
+            }
+            else {
+                // Fallback genérico: #t=SEGUNDOS (HTML5 video spec universal)
+                urlFinal += `${separadorHash}t=${segundos}`;
+            }
+        }
+
         // 2. CREACIÓN DEL REPRODUCTOR (Esperamos 200ms para asegurar estabilidad en Android)
         setTimeout(() => {
             if (myPlayId !== playbackSessionId) return;
@@ -4389,13 +4667,17 @@ async function reproducirEpisodio(titulo, num) {
             nuevoIframe.src = urlFinal;
             container.appendChild(nuevoIframe);
             
-            // Guardar progreso inicial al cargar el episodio
+            // 💡 REGISTRO DE TIEMPO DE INICIO Y LIMPIEZA DE INTERVALOS PREVIOS
+            playbackStartTime = Date.now();
+            if (progresoIntervalGlobal) clearInterval(progresoIntervalGlobal);
+
+            // Guardar progreso inicial al cargar el episodio (0 segundos)
             guardarProgresoReproduccion(currentAnime.mal_id, num, 0);
             
             // Configurar guardado automático de progreso cada 30 segundos
-            const progresoInterval = setInterval(() => {
-                if (container.style.display === 'none') {
-                    clearInterval(progresoInterval);
+            progresoIntervalGlobal = setInterval(() => {
+                if (container.style.display === 'none' || myPlayId !== playbackSessionId) {
+                    clearInterval(progresoIntervalGlobal);
                     return;
                 }
                 // Estimamos el progreso basado en el tiempo transcurrido
@@ -4425,6 +4707,9 @@ async function reproducirEpisodio(titulo, num) {
     }
 }
 
+// ==========================================
+// LISTENER PARA PANTALLA COMPLETA
+// ==========================================
 document.addEventListener('fullscreenchange', () => {
     const iframe = document.querySelector('.video-iframe-aidume');
     if (!iframe) return;
@@ -5399,7 +5684,7 @@ async function cargarMensajesChat() {
     const ultimaVezLeido = perfilLocal?.ultimo_visto_chat || localStorage.getItem('last_chat_read') || tiempoLimite;
     const chatAbierto = document.getElementById('chat-window').style.display === 'flex';
 
-    // Solo traer mensajes NUEVOS (mayores al último ID que tenemos)
+    // Traer mensajes NUEVOS
     let query = _db
         .from('chat_global')
         .select(`
@@ -5409,7 +5694,6 @@ async function cargarMensajesChat() {
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
 
-    // Si ya tenemos mensajes cargados, solo traemos los nuevos
     if (ultimoIdMensajeChat > 0) {
         query = query.gt('id', ultimoIdMensajeChat);
     }
@@ -5423,7 +5707,6 @@ async function cargarMensajesChat() {
 
     if (!mensajes || mensajes.length === 0) return;
 
-    // Si es la primera carga (no hay mensajes en el DOM), hacemos carga completa
     const esCargaInicial = (ultimoIdMensajeChat === 0);
     
     if (esCargaInicial) {
@@ -5434,12 +5717,39 @@ async function cargarMensajesChat() {
     let mencionDetectada = false;
     let htmlNuevos = "";
 
-    mensajes.forEach(m => {
+    // Recuperamos la lista de reportes automáticos ya enviados en esta sesión/dispositivo
+    let reportesEnviados = JSON.parse(localStorage.getItem('reportes_automaticos_enviados')) || [];
+
+    mensajes.forEach(async (m) => {
         // Actualizar el último ID
         if (m.id > ultimoIdMensajeChat) ultimoIdMensajeChat = m.id;
 
         // Si el mensaje ya existe en el DOM, lo saltamos
         if (!esCargaInicial && document.querySelector(`[data-msg-id="${m.id}"]`)) return;
+
+        // 🚨 AUTOMODERACIÓN: DETECCIÓN DE OFENSAS O LINKS
+        let mensajeProcesado = m.mensaje;
+        let esOfensivo = contieneOfensa(m.mensaje);
+
+        if (esOfensivo) {
+            // 1. Censura visual inmediata en el chat
+            mensajeProcesado = `🚫 [Mensaje ocultado por el sistema de moderación]`;
+
+            // 2. Reporte automático a la base de datos (si no se envió antes)
+            if (!reportesEnviados.includes(m.id)) {
+                reportesEnviados.push(m.id);
+                localStorage.setItem('reportes_automaticos_enviados', JSON.stringify(reportesEnviados));
+
+                // Insertamos directo en tu tabla de reportes
+                const motivoAuto = `[AUTOMOD_CHAT] Mensaje ofensivo o link detectado automáticamente | Mensaje original: "${m.mensaje}" (Usuario: ${m.usuario})`;
+                
+                await _db.from('reportes').insert([{
+                    comentario_id: null, // O usar una columna específica si agregás chat_id en un futuro
+                    usuario_reporta: "SISTEMA_AUTO_MOD",
+                    motivo: motivoAuto
+                }]);
+            }
+        }
 
         const todosLosAvatares = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
         const perfilData = Array.isArray(m.perfiles) ? m.perfiles[0] : m.perfiles;
@@ -5461,12 +5771,15 @@ async function cargarMensajesChat() {
 
         if (m.fecha > ultimaVezLeido) nuevosCount++;
 
-        let textoMsj = parsearMensajeParaStickers(m.mensaje);
+        // Usamos la variable 'mensajeProcesado' (que puede estar censurada o limpia)
+        let textoMsj = parsearMensajeParaStickers(mensajeProcesado);
+        
+        // Si el mensaje es ofensivo, anulamos las menciones para no molestar al usuario arrobado
         const regexMencion = new RegExp(`@${currentUser}`, 'i');
-        const soyYoArrobado = currentUser && regexMencion.test(m.mensaje);
+        const soyYoArrobado = currentUser && regexMencion.test(mensajeProcesado) && !esOfensivo;
 
         if (soyYoArrobado) {
-            textoMsj = m.mensaje.replace(regexMencion, `<span class="chat-mention-me">$&</span>`);
+            textoMsj = mensajeProcesado.replace(regexMencion, `<span class="chat-mention-me">$&</span>`);
             if (m.fecha > ultimaVezLeido) mencionDetectada = true;
         }
 
@@ -5478,8 +5791,9 @@ async function cargarMensajesChat() {
             ? '<span style="position:absolute; bottom:4px; right:8px; font-size:0.7rem; filter:drop-shadow(0 0 3px gold);">👑</span>' 
             : '';
 
-        const replyHtml = renderizarRespuestaCitada(m.reply_to_json);
-        const accionesHtml = `
+        // Si es ofensivo, desactivamos la opción de citar/responder para no propagar el spam
+        const replyHtml = esOfensivo ? "" : renderizarRespuestaCitada(m.reply_to_json);
+        const accionesHtml = esOfensivo ? "" : `
             <div class="chat-msg-actions">
                 <button class="chat-action-btn" onclick="mostrarSelectorReacciones(${m.id}, 'chat_global', this)" title="Reaccionar">😊</button>
                 <button class="chat-action-btn" onclick="responderAMensaje(${m.id}, '${m.usuario}', '${m.mensaje.replace(/'/g, "\\'").replace(/"/g, '"')}', 'chat-input')" title="Responder">↩️</button>
@@ -5497,10 +5811,10 @@ async function cargarMensajesChat() {
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <strong class="chat-user-name" onclick="verPerfilAjeno('${m.usuario}')" style="cursor:pointer; text-decoration:underline;">@${m.usuario}</strong>
                         ${obtenerHtmlRacha(perfilData?.racha_dias)}
-                        <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat">🚩</button>
+                        <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat" ${esOfensivo ? 'disabled style="opacity:0.2;"' : ''}>🚩</button>
                     </div>
                     ${replyHtml}
-                    <div class="chat-text" style="color:${esPremium ? 'var(--gold)' : 'white'}; font-size:0.9rem; font-weight:${esPremium ? 'bold' : 'normal'};">${textoMsj}</div>
+                    <div class="chat-text" style="color:${esOfensivo ? '#ff4757' : (esPremium ? 'var(--gold)' : 'white')}; font-size:0.9rem; font-style:${esOfensivo ? 'italic' : 'normal'}; font-weight:${esPremium ? 'bold' : 'normal'};">${textoMsj}</div>
                     ${coronaPremium}
                     <div class="chat-reactions-container" id="reacciones-${m.id}-chat_global"></div>
                     ${accionesHtml}
@@ -5510,17 +5824,13 @@ async function cargarMensajesChat() {
         if (esCargaInicial) {
             htmlNuevos += msgHtml;
         } else {
-            // Insertar al final del contenedor
             container.insertAdjacentHTML('beforeend', msgHtml);
-            // Cargar reacciones para este mensaje nuevo
             cargarReaccionesEnMensaje(m.id, 'chat_global');
         }
     });
 
-    // Si es carga inicial, insertamos todo de una
     if (esCargaInicial && htmlNuevos) {
         container.innerHTML = htmlNuevos;
-        // Cargar reacciones para todos los mensajes
         mensajes.forEach(m => cargarReaccionesEnMensaje(m.id, 'chat_global'));
     }
 
@@ -6363,5 +6673,244 @@ async function verificarRecompensaMentor(xpGanada) {
         }
     } catch (err) {
         console.error("Error en verificarRecompensaMentor:", err);
+    }
+}
+
+/**
+ * Obtiene el objeto amigos_data desde la columna JSONB de perfiles
+ */
+async function obtenerAmigosData(usuario) {
+    try {
+        const { data, error } = await _db
+            .from('perfiles')
+            .select('amigos_data')
+            .ilike('nombre', usuario.trim())
+            .single();
+
+        if (error) {
+            console.error(`Error al obtener amigos_data para ${usuario}:`, error);
+            return { amigos: [], solicitudes_enviadas: [], solicitudes_recibidas: [] };
+        }
+
+        // Si la columna está vacía o es null, devolvemos la estructura limpia por defecto
+        return data?.amigos_data || { amigos: [], solicitudes_enviadas: [], solicitudes_recibidas: [] };
+    } catch (err) {
+        console.error("Excepción en obtenerAmigosData:", err);
+        return { amigos: [], solicitudes_enviadas: [], solicitudes_recibidas: [] };
+    }
+}
+
+/**
+ * Guarda el objeto amigos_data actualizado en la columna JSONB de perfiles
+ */
+async function guardarAmigosData(usuario, dataAmigos) {
+    try {
+        const { error } = await _db
+            .from('perfiles')
+            .update({ amigos_data: dataAmigos })
+            .ilike('nombre', usuario.trim());
+
+        if (error) {
+            console.error(`Error al guardar amigos_data para ${usuario}:`, error);
+            throw error;
+        }
+        return true;
+    } catch (err) {
+        console.error("Excepción en guardarAmigosData:", err);
+        throw err;
+    }
+}
+
+const METADATA_CACHE_KEY = 'aidume_anime_metadata_cache';
+const CACHE_EXPIRATION_MS = 5 * 24 * 60 * 60 * 1000; // 7 días en milisegundos
+
+function obtenerCacheMetadata() {
+    try {
+        const cache = localStorage.getItem(METADATA_CACHE_KEY);
+        return cache ? JSON.parse(cache) : {};
+    } catch (e) {
+        console.error("Error al leer localStorage:", e);
+        return {};
+    }
+}
+
+function guardarCacheMetadata(cache) {
+    try {
+        localStorage.setItem(METADATA_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        console.error("Error al escribir en localStorage:", e);
+    }
+}
+
+async function fetchJikanBatchConCache(ids) {
+    const cache = obtenerCacheMetadata();
+    const mapResultados = {};
+    const idsFaltantes = [];
+    const ahora = Date.now();
+
+    ids.forEach(id => {
+        const itemGuardado = cache[id];
+        
+        // 💡 VERIFICACIÓN: Si existe y NO ha expirado, lo usamos directo de la caché
+        if (itemGuardado && itemGuardado.expira_en && ahora < itemGuardado.expira_en) {
+            mapResultados[id] = itemGuardado.data;
+        } else {
+            // Si no existe, o si ya pasaron los 7 días, lo mandamos a actualizar
+            idsFaltantes.push(id);
+        }
+    });
+
+    if (idsFaltantes.length === 0) {
+        return mapResultados;
+    }
+
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
+    for (const id of idsFaltantes) {
+        try {
+            await delay(370); // Retraso seguro para Jikan
+            const res = await fetch(`https://api.jikan.moe/v4/anime/${id}`);
+            if (res.ok) {
+                const json = await res.json();
+                if (json.data) {
+                    const infoConExpiracion = {
+                        data: json.data, // Guardamos la data completa de Jikan
+                        expira_en: ahora + CACHE_EXPIRATION_MS // Seteamos la fecha límite (hoy + 7 días)
+                    };
+
+                    mapResultados[id] = json.data;
+                    cache[id] = infoConExpiracion;
+                }
+            }
+        } catch (err) {
+            console.error(`Error de red con Jikan para ID ${id}:`, err);
+            
+            // 🛡️ PLAN B: Si la API falla (por ejemplo, sin internet), pero teníamos
+            // un dato viejo expirado en caché, lo usamos temporalmente para no mostrar la pantalla rota
+            if (cache[id]) {
+                console.warn(`Usando caché expirada de forma temporal para ID ${id}`);
+                mapResultados[id] = cache[id].data;
+            }
+        }
+    }
+
+    guardarCacheMetadata(cache);
+    return mapResultados;
+}
+
+// ==========================================
+// 1. FUNCIÓN PUENTE PARA REANUDAR EL ANIME
+// ==========================================
+async function continuarViendoAnime(animeId, episodioNum, segundos) {
+    try {
+        console.log(`🚀 [Continuar Viendo] Recuperando anime ID ${animeId} para reanudar en Ep ${episodioNum} (${segundos}s)`);
+        
+        // 1. Consultamos a la API de Jikan para obtener el objeto completo del anime
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${animeId}`);
+        const fullData = await res.json();
+        
+        if (!fullData || !fullData.data) {
+            throw new Error("No se pudo obtener la información del anime desde Jikan.");
+        }
+        
+        const animeObjeto = fullData.data;
+
+        // 2. Ejecutamos tu función showDetails para renderizar la vista de detalles del anime
+        await showDetails(animeObjeto);
+        
+        // 3. Esperamos a que se dibuje la interfaz en pantalla y lanzamos el reproductor
+        setTimeout(() => {
+            const nombreFinal = animeObjeto.title;
+            // Llamamos a la versión unificada de reproducirEpisodio pasándole el segundo exacto
+            reproducirEpisodio(nombreFinal, episodioNum, segundos);
+        }, 700); 
+
+    } catch (error) {
+        console.error("🚨 Error en continuarViendoAnime:", error);
+        alert("No se pudo reanudar el episodio. Intenta abrir el anime manualmente.");
+    }
+}
+
+// ==========================================
+// 2. RENDERIZADO DINÁMICO DE LA SECCIÓN
+// ==========================================
+async function cargarSeccionContinuarViendo() {
+    const seccionContainer = document.getElementById('seccion-continuar-viendo');
+    const listaContainer = document.getElementById('lista-continuar-viendo');
+    
+    if (!seccionContainer || !listaContainer) return;
+    if (!currentUser) {
+        seccionContainer.style.display = 'none';
+        return;
+    }
+
+    try {
+        console.log("🔄 [Continuar Viendo] Cargando progresos desde la DB...");
+
+        const { data: progresos, error } = await _db
+            .from('progreso_reproduccion')
+            .select('*')
+            .eq('usuario', currentUser)
+            .order('fecha_actualizacion', { ascending: false })
+            .limit(5);
+
+        if (error) throw error;
+
+        if (!progresos || progresos.length === 0) {
+            seccionContainer.style.display = 'none';
+            return;
+        }
+
+        seccionContainer.style.display = 'block';
+        listaContainer.innerHTML = '';
+
+        const promesasDetalles = progresos.map(async (progreso) => {
+            try {
+                const res = await fetch(`https://api.jikan.moe/v4/anime/${progreso.anime_id}`);
+                const resJson = await res.json();
+                return { progreso, anime: resJson.data };
+            } catch (err) {
+                return { progreso, anime: null };
+            }
+        });
+
+        const resultados = await Promise.all(promesasDetalles);
+        let html = '';
+
+        resultados.forEach(({ progreso, anime }) => {
+            if (!anime) return;
+
+            const nombreAnime = anime.titles ? (anime.titles.find(t => t.type === 'Spanish')?.title || anime.title) : anime.title;
+            const imagenUrl = anime.images?.jpg?.image_url || 'img/placeholder.jpg';
+            
+            const minutos = Math.floor(progreso.progreso_segundos / 60);
+            const segundosRestantes = progreso.progreso_segundos % 60;
+            const tiempoFormateado = minutos > 0 ? `${minutos}m ${segundosRestantes}s` : `${segundosRestantes}s`;
+
+            // HTML con etiqueta <img> para mayor persistencia
+            html += `
+                <div class="continuar-viendo-card" 
+                     onclick="continuarViendoAnime(${progreso.anime_id}, ${progreso.episodio_num}, ${progreso.progreso_segundos})"
+                     style="display: block !important; position: relative !important; cursor: pointer !important;">
+                    
+                    <img src="${imagenUrl}" style="position: absolute !important; width: 100% !important; height: 100% !important; object-fit: cover !important; z-index: 0 !important;">
+                    
+                    <div class="continuar-viendo-overlay" style="position: absolute !important; inset: 0 !important; background: rgba(0,0,0,0.5) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 2 !important;">
+                        <div class="play-btn-circle" style="width: 45px !important; height: 45px !important; border-radius: 50% !important; background: var(--gold) !important; color: #000 !important; display: flex !important; align-items: center !important; justify-content: center !important; font-size: 1.2rem !important; font-weight: bold !important;">▶</div>
+                    </div>
+                    
+                    <div class="continuar-viendo-info" style="position: absolute !important; bottom: 0 !important; left: 0 !important; right: 0 !important; padding: 12px !important; z-index: 3 !important;">
+                        <span class="badge-ep-gold" style="background: var(--gold) !important; color: #000 !important; font-size: 0.75rem !important; font-weight: bold !important; padding: 3px 8px !important; border-radius: 4px !important;">Ep ${progreso.episodio_num} • ${tiempoFormateado}</span>
+                        <h4 class="continuar-viendo-titulo" style="margin: 5px 0 0 0 !important; color: #fff !important; font-size: 0.95rem !important; text-shadow: 1px 1px 2px #000 !important;">${nombreAnime}</h4>
+                    </div>
+                </div>
+            `;
+        });
+
+        listaContainer.innerHTML = html;
+
+    } catch (err) {
+        console.error("🚨 Error:", err);
+        seccionContainer.style.display = 'none';
     }
 }

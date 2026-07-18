@@ -1047,16 +1047,27 @@ function checkUser() {
             document.getElementById('nav-avatar').src = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}`;
         }
 
-        // LÓGICA DE ACCESO A MODERACIÓN (Admin y Dueño)
-        if (data.rol === 'admin' || data.rol === 'dueño') {
+        // LÓGICA DE ACCESO A MODERACIÓN (Dueño, Admin y Moderador)
+        if (data.rol === 'admin' || data.rol === 'dueño' || data.rol === 'moderador') {
             const nav = document.querySelector('.bottom-nav');
             const yaExiste = document.querySelector('div[onclick*="admin-panel"]');
             
             if (nav && !yaExiste) {
                 // Personalizamos el icono y texto según el rango
                 const esDueño = data.rol === 'dueño';
-                const icono = esDueño ? '👑' : '🛡️';
-                const etiqueta = esDueño ? 'Owner' : 'Admin';
+                const esAdmin = data.rol === 'admin';
+                let icono, etiqueta;
+                
+                if (esDueño) {
+                    icono = '👑';
+                    etiqueta = 'Owner';
+                } else if (esAdmin) {
+                    icono = '🛡️';
+                    etiqueta = 'Admin';
+                } else {
+                    icono = '🔍';
+                    etiqueta = 'Mod';
+                }
 
                 // Inyectamos el botón correspondiente en el menú inferior
                 nav.innerHTML += `

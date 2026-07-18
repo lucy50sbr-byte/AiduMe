@@ -70,13 +70,11 @@ async function ejecutarAuth() {
             }
 
             // 🛑 NUEVO: Solicitar permiso de notificaciones AQUÍ, directamente en el gesto del usuario
-            // (antes de cualquier async/await o modal) para que funcione en móvil.
             if ("Notification" in window && Notification.permission === "default") {
                 Notification.requestPermission();
             }
 
-            // 3. Apertura del Reglamento de Oro (Sustituye al confirm)
-            // Nota: El botón "ACEPTO" de este modal debe llamar a aceptarNormasRegistro()
+            // 3. Apertura del Reglamento de Oro
             abrirNormasRegistro();
 
         } else {
@@ -91,13 +89,26 @@ async function ejecutarAuth() {
             if (error) throw error;
             if (!perfil) return mostrarAlerta("Usuario o contraseña incorrectos");
 
-            // 4. Verificación de Baneo
+            // 4. Verificación de Baneo con Motivo Integrado
             if (perfil.baneado_hasta) {
                 const ahora = new Date();
                 const finBaneo = new Date(perfil.baneado_hasta);
                 
                 if (ahora < finBaneo) {
-                    return mostrarAlerta(`⛔ ACCESO DENEGADO\n\nEstás suspendido.\nFin de la sanción: ${finBaneo.toLocaleString()}`);
+                    // Extraemos el motivo o dejamos uno por defecto si está vacío
+                    const motivoSancion = perfil.sancion_motivo 
+                        ? perfil.sancion_motivo 
+                        : "No se especificó un motivo particular.";
+
+                    // Usamos goldAlert para renderizar un bloqueo estético y detallado
+                    return goldAlert({
+                        title: "🚫 ACCESO DENEGADO",
+                        text: `Tu cuenta se encuentra suspendida temporal o permanentemente.\n\n` +
+                              `📝 Motivo: ${motivoSancion}\n\n` +
+                              `⏳ Fin de la sanción: ${finBaneo.toLocaleString()}`,
+                        icon: "⛔",
+                        confirmText: "ENTENDIDO"
+                    });
                 }
             }
 
@@ -192,6 +203,9 @@ function finalizarLogin(perfil) {
         avatar_id: perfil.avatar_id || '1',
         ultimo_visto_chat: perfil.ultimo_visto_chat
     }));
+
+    // --- OCULTAR SECCIONES DEL PANEL PARA MODERADORES ---
+    ocultarSeccionesModerador();
     
     // Mostramos el icono de chat antes de cualquier otra acción
     const chatBubble = document.getElementById('chat-bubble');
@@ -207,9 +221,52 @@ function finalizarLogin(perfil) {
     location.reload();
 }
 
-function checkUser() {
-    // ... todo este bloque fuera ...
+// Asegúrate de que tienes declarada la variable global currentUser al inicio de tu JS:
+// let currentUser = null;
+
+async function checkUser() {
+    console.log("🔄 Verificando sesión de usuario...");
+    
+    // 1. Intentamos leer el perfil guardado en el localStorage
+    const perfilGuardado = localStorage.getItem('aidume_profile');
+    
+    if (perfilGuardado) {
+        try {
+            const perfil = JSON.parse(perfilGuardado);
+            
+            // Definimos el usuario actual (usamos su nombre o ID único según tu DB)
+            currentUser = perfil.name; 
+            
+            console.log(`✅ Usuario activo detectado: ${currentUser}`);
+            
+            // --- OCULTAR SECCIONES DEL PANEL PARA MODERADORES ---
+            setTimeout(() => {
+                ocultarSeccionesModerador();
+            }, 100);
+
+            // --- AQUÍ SE DISPARA TU SECCIÓN AL CARGAR LA PÁGINA ---
+            if (currentUser) {
+                // El retraso de 300ms evita conflictos con otras funciones de renderizado inicial
+                setTimeout(async () => {
+                    await cargarSeccionContinuarViendo();
+                }, 300);
+            }
+            
+        } catch (e) {
+            console.error("Error al parsear el perfil guardado:", e);
+            currentUser = null;
+        }
+    } else {
+        console.log("ℹ️ No hay ninguna sesión activa de usuario.");
+        currentUser = null;
+        
+        // Si no hay usuario, nos aseguramos de ocultar la sección
+        const seccionCB = document.getElementById('seccion-continuar-viendo');
+        if (seccionCB) seccionCB.style.display = 'none';
+    }
 }
+
+// Evento de inicio de la app
 window.onload = checkUser;
 
 function cerrarSesion() {
@@ -621,6 +678,34 @@ window.addEventListener('load', () => {
     }
 });
 
+
+/**
+ * Oculta las secciones del panel de administración que no corresponden al moderador
+ * (subir episodios y forzar actualización). Los admins y dueños ven todo completo.
+ */
+function ocultarSeccionesModerador() {
+    const perfil = JSON.parse(localStorage.getItem('aidume_profile'));
+    if (!perfil) return;
+
+    // Solo aplica si es moderador
+    if (perfil.rol === 'moderador') {
+        // Ocultar la sección de "Subir Link de Episodio"
+        const uploadCard = document.querySelector('.admin-upload-card');
+        if (uploadCard) uploadCard.style.display = 'none';
+
+        // Ocultar la sección de "Actualización de App"
+        const updateCards = document.querySelectorAll('.admin-card');
+        updateCards.forEach(card => {
+            if (card.innerHTML && card.innerHTML.includes('triggerAppUpdate')) {
+                card.style.display = 'none';
+            }
+        });
+
+        // Ocultar el botón de "Banear Permanente"
+        const banBtn = document.querySelector('button[onclick*="suspenderUsuario(0)"]');
+        if (banBtn) banBtn.style.display = 'none';
+    }
+}
 
 // --- INICIALIZACIÓN DE INTERFAZ EN AUTH.JS ---
 document.addEventListener('DOMContentLoaded', () => {

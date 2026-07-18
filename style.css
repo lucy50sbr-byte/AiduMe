@@ -3402,3 +3402,166 @@ header {
 .wp-invite-btn:hover {
     box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
 }
+
+
+/* Contenedor principal del spoiler */
+.spoiler-container {
+    position: relative;
+    background: #1a1a1a;
+    border: 1px dashed #ffcc00;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 8px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: background-color 0.2s;
+}
+
+/* Capa que bloquea el contenido (La imagen de Spoiler Alert) */
+.spoiler-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #ffcc00;
+    background-image: repeating-linear-gradient(
+        45deg,
+        #111,
+        #111 10px,
+        #ffcc00 10px,
+        #ffcc00 20px
+    ); /* Rayas de peligro */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
+/* El cartelito del centro */
+.spoiler-badge {
+    background: #111;
+    color: #ffcc00;
+    padding: 8px 16px;
+    font-weight: bold;
+    border-radius: 4px;
+    border: 2px solid #ffcc00;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+}
+
+/* El texto real del spoiler (inicialmente invisible bajo la capa) */
+.spoiler-text {
+    opacity: 0;
+    filter: blur(5px);
+    transition: opacity 0.3s ease, filter 0.3s ease;
+    color: #fff;
+}
+
+/* Estado cuando se hace click (se revela) */
+.spoiler-container.revealed .spoiler-overlay {
+    opacity: 0;
+    pointer-events: none; /* Permite clickear lo que hay abajo */
+}
+
+.spoiler-container.revealed .spoiler-text {
+    opacity: 1;
+    filter: blur(0);
+}
+
+
+#seccion-continuar-viendo {
+    margin: 25px 0 !important;
+    width: 100% !important;
+    display: block !important;
+}
+
+#lista-continuar-viendo {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 15px !important;
+    overflow-x: auto !important;
+    padding: 10px 5px !important;
+    scroll-behavior: smooth !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+#lista-continuar-viendo::-webkit-scrollbar {
+    height: 6px !important;
+}
+#lista-continuar-viendo::-webkit-scrollbar-thumb {
+    background: var(--gold) !important;
+    border-radius: 10px !important;
+}
+
+#lista-continuar-viendo > div {
+    position: relative !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+    height: 140px !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 215, 0, 0.3) !important;
+    cursor: pointer !important;
+    overflow: hidden !important;
+    display: block !important;
+    background: #000 !important; /* Fondo base */
+    transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+#lista-continuar-viendo > div:hover {
+    transform: translateY(-4px) !important;
+    border-color: var(--gold) !important;
+    box-shadow: 0 5px 15px rgba(255, 215, 0, 0.4) !important;
+}
+
+/* 💡 Control absoluto de la imagen insertada al fondo */
+.cv-cover-img {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    z-index: 0 !important;
+    pointer-events: none !important; /* Evita que interfiera con los clics */
+}
+
+/* Degradado oscuro por encima de la imagen y por debajo del texto */
+#lista-continuar-viendo > div::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.85) 100%) !important;
+    z-index: 1 !important;
+    display: block !important;
+}
+
+/* ===== OJITO PARA PASSWORD ===== */
+.password-wrapper {
+    position: relative;
+    width: 90%;
+    margin: 0 auto 10px auto;
+}
+
+.password-toggle-eye {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    font-size: 1.2rem;
+    user-select: none;
+    z-index: 2;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    line-height: 1;
+    padding: 4px;
+}
+
+.password-toggle-eye:hover {
+    opacity: 1;
+}
