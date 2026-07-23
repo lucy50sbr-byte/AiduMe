@@ -207,11 +207,17 @@ function finalizarLogin(perfil) {
     // --- OCULTAR SECCIONES DEL PANEL PARA MODERADORES ---
     ocultarSeccionesModerador();
     
-    // Mostramos el icono de chat antes de cualquier otra acción
+    if (typeof esDispositivoTV === 'function' && esDispositivoTV()) {
+        localStorage.setItem('hide_chat', 'true');
+    }
+    
+    // Mostramos el icono de chat solo si no está oculto
     const chatBubble = document.getElementById('chat-bubble');
     const hideChat = localStorage.getItem('hide_chat') === 'true';
     if (chatBubble && !hideChat) {
         chatBubble.style.display = 'flex';
+    } else if (chatBubble) {
+        chatBubble.style.display = 'none';
     }
 
     // Pedimos permiso de notificaciones
@@ -420,6 +426,16 @@ window.addEventListener('load', solicitarPermisoNotificaciones);
 function esDispositivoTV() {
     const ua = navigator.userAgent || navigator.vendor || window.opera || '';
     
+    // ===== DETECCIÓN POR URL: ?tv=1 (para apps de Android Studio con WebView) =====
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('tv') === '1') return true;
+
+    // ===== DETECCIÓN POR USER AGENT CUSTOM: AiduMeTV =====
+    if (/AiduMeTV/i.test(ua)) return true;
+
+    // ===== DETECCIÓN POR SESIÓN: Si ya se activó el modo TV manualmente =====
+    if (sessionStorage.getItem('aidume_modo_tv') === '1') return true;
+
     // Detecta Android TV, Google TV, Apple TV, Smart TV, consolas y dispositivos TV-box
     const patronesTV = [
         /Android.*TV/i,
@@ -467,6 +483,16 @@ function esDispositivoTV() {
     );
 
     return patronesTV.some(p => p.test(ua)) || esTVMode;
+}
+
+/**
+ * Activa el modo TV manualmente (botón en la pantalla de login)
+ */
+function activarModoTVManual() {
+    sessionStorage.setItem('aidume_modo_tv', '1');
+    localStorage.setItem('hide_chat', 'true');
+    document.documentElement.classList.add('tv-device');
+    iniciarSesionTV();
 }
 
 // ===== SISTEMA DE ACCESO RÁPIDO PARA TV =====
@@ -664,9 +690,49 @@ if (esDispositivoTV()) {
             setTimeout(() => iniciarSesionTV(), 500);
         }
     });
+} else {
+    // Si NO se detectó TV automáticamente, agregar un botón manual en el login
+    // para que el usuario pueda activar el modo TV desde cualquier dispositivo
+    window.addEventListener('load', () => {
+        const perfil = localStorage.getItem('aidume_profile');
+        if (!perfil) {
+            // Solo mostrar el botón si no hay sesión activa (pantalla de login visible)
+            setTimeout(() => {
+                const authCard = document.querySelector('#auth-overlay .auth-card');
+                if (authCard && !document.getElementById('btn-modo-tv-manual')) {
+                    const separador = document.createElement('div');
+                    separador.style.cssText = 'display:flex; align-items:center; gap:10px; margin:15px 0 10px; width:90%;';
+                    separador.innerHTML = '<hr style="flex:1; border:none; border-top:1px solid #333;"><span style="color:#555; font-size:0.7rem; white-space:nowrap;">¿Estás en una TV?</span><hr style="flex:1; border:none; border-top:1px solid #333;">';
+
+                    const btnTV = document.createElement('button');
+                    btnTV.id = 'btn-modo-tv-manual';
+                    btnTV.innerHTML = '📺 ACCEDER DESDE TV';
+                    btnTV.style.cssText = `
+                        width: 90%; padding: 12px; border-radius: 25px;
+                        background: transparent; color: #00ff88;
+                        border: 2px solid #00ff88; font-weight: bold;
+                        cursor: pointer; font-size: 0.85rem;
+                        letter-spacing: 1px; transition: all 0.3s ease;
+                        margin-bottom: 5px;
+                    `;
+                    btnTV.onmouseenter = () => { btnTV.style.background = 'rgba(0,255,136,0.1)'; btnTV.style.boxShadow = '0 0 20px rgba(0,255,136,0.2)'; };
+                    btnTV.onmouseleave = () => { btnTV.style.background = 'transparent'; btnTV.style.boxShadow = 'none'; };
+                    btnTV.onclick = activarModoTVManual;
+
+                    authCard.appendChild(separador);
+                    authCard.appendChild(btnTV);
+                }
+            }, 300);
+        }
+    });
 }
 
 window.addEventListener('load', () => {
+    // Si estamos en modo TV, forzar siempre la opción de ocultar el chat
+    if (typeof esDispositivoTV === 'function' && esDispositivoTV()) {
+        localStorage.setItem('hide_chat', 'true');
+    }
+
     const perfilGuardado = localStorage.getItem('aidume_profile');
     const chatBubble = document.getElementById('chat-bubble');
     const hideChat = localStorage.getItem('hide_chat') === 'true';

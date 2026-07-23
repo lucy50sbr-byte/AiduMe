@@ -670,9 +670,25 @@ async function actualizarPerfilDesdeSQL(nombreAMostrar = currentUser) {
         const aniosAntiguedad = (new Date() - fechaRegistro) / (1000 * 60 * 60 * 24 * 365.25);
 
         // --- 3. ACTUALIZACIÓN DE TEXTOS Y UI ---
-        if (elementos.elUser) elementos.elUser.innerText = perfil.nombre;
-        if (elementos.elLevel) elementos.elLevel.innerText = perfil.nivel;
+        
+        // 1. Primero calculamos la insignia de rol si corresponde
+        let rolBadgeHtml = '';
+        if (perfil.rol && ['admin', 'moderador', 'dueño'].includes(perfil.rol)) {
+            const icono = perfil.rol === 'dueño' ? '👑' : perfil.rol === 'admin' ? '🛡️' : '🔍';
+            const etiqueta = perfil.rol === 'dueño' ? 'OWNER' : perfil.rol === 'admin' ? 'ADMIN' : 'MOD';
+            
+            // Le agregamos estilos inline para que se alinee perfectamente al lado del texto
+            rolBadgeHtml = `<span class="rol-badge profile-rol-badge ${perfil.rol === 'dueño' ? 'owner' : perfil.rol === 'admin' ? 'admin' : 'moderador'}" style="margin-left: 8px; display: inline-flex; align-items: center; vertical-align: middle;">${icono} ${etiqueta}</span>`;
+        }
 
+        // 2. Inyectamos el nombre junto con su medalla al lado (usando innerHTML)
+        if (elementos.elUser) {
+            elementos.elUser.innerHTML = `${perfil.nombre}${rolBadgeHtml}`;
+        }
+        
+        if (elementos.elLevel) elementos.elLevel.innerText = perfil.nivel;
+        
+        // 3. El rango/estandarte ahora se renderiza limpio sin la medalla de rol
         if (elementos.elRank) {
             const htmlRacha = typeof obtenerHtmlRacha === 'function' ? obtenerHtmlRacha(perfil.racha_dias) : "";
             elementos.elRank.innerHTML = htmlRacha || "ASPIRANTE";
@@ -1037,6 +1053,19 @@ function checkUser() {
 
         if (document.getElementById('display-user')) {
             document.getElementById('display-user').innerText = data.name;
+        }
+
+        // Mostrar insignia de rol en el perfil si es admin/moderador/owner
+        if (data.rol && ['admin', 'moderador', 'dueño'].includes(data.rol)) {
+            const rankEl = document.getElementById('display-rank');
+            if (rankEl && !rankEl.querySelector('.rol-badge')) {
+                const badge = document.createElement('span');
+                badge.className = `rol-badge profile-rol-badge ${data.rol === 'dueño' ? 'owner' : data.rol === 'admin' ? 'admin' : 'moderador'}`;
+                const icono = data.rol === 'dueño' ? '👑' : data.rol === 'admin' ? '🛡️' : '🔍';
+                const etiqueta = data.rol === 'dueño' ? 'OWNER' : data.rol === 'admin' ? 'ADMIN' : 'MOD';
+                badge.innerHTML = `${icono} ${etiqueta}`;
+                rankEl.appendChild(badge);
+            }
         }
 
         // --- NUEVO: ACTUALIZACIÓN DEL AVATAR EN LA BARRA DE NAVEGACIÓN ---
@@ -1508,4 +1537,171 @@ function insertSticker(url) {
         if (sendBtn) sendBtn.click();
     }
     document.getElementById('global-sticker-picker').style.display = 'none';
+}
+
+// ===== DETECTOR DE CONEXIÓN A INTERNET A NIVEL WEB =====
+function verificarConexionWeb() {
+    const offlineOverlay = document.getElementById('offline-overlay');
+    if (!offlineOverlay) return;
+
+    if (!navigator.onLine) {
+        offlineOverlay.style.display = 'flex';
+    } else {
+        offlineOverlay.style.display = 'none';
+    }
+}
+
+window.addEventListener('offline', () => {
+    verificarConexionWeb();
+});
+
+window.addEventListener('online', () => {
+    verificarConexionWeb();
+});
+
+window.addEventListener('load', () => {
+    verificarConexionWeb();
+});
+
+// ===== EFECTO DE SONIDO SUTIL DE NAVEGACIÓN EN TV =====
+function reproducirSonidoNavegacionTV() {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime); // 440 Hz (Nota La)
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.04);
+        gain.gain.setValueAtTime(0.03, audioCtx.currentTime); // Volume suave 3%
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.04);
+    } catch (e) {}
+}
+
+// ===== CONTROL REMOTO DE TV (D-PAD BACK Y TECLAS MULTIMEDIA) =====
+window.addEventListener('keydown', (e) => {
+    const code = e.keyCode || e.which;
+    const key = e.key;
+
+    // Reproducir sonido sutil de navegación en TV cuando el usuario usa las flechas del D-pad
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 37, 38, 39, 40].includes(key) || [37, 38, 39, 40].includes(code)) {
+        reproducirSonidoNavegacionTV();
+    }
+
+    // TECLA ATRÁS DE SMART TV / CONTROL REMOTO (Escape = 27, Back = 461/10009/88/10007)
+    if (key === 'Escape' || key === 'Back' || code === 27 || code === 461 || code === 10009 || code === 88 || code === 10007) {
+        // 1. Si el reproductor o modal de detalles está abierto, cerrarlo primero
+        const detailsView = document.getElementById('details');
+        const videoPlayerContainer = document.getElementById('video-player-container');
+        
+        if (videoPlayerContainer && videoPlayerContainer.style.display !== 'none') {
+            e.preventDefault();
+            hideDetails();
+            return;
+        }
+
+        if (detailsView && detailsView.style.display !== 'none') {
+            e.preventDefault();
+            hideDetails();
+            return;
+        }
+
+        const modalNormas = document.getElementById('modal-normas');
+        if (modalNormas && modalNormas.style.display === 'flex') {
+            e.preventDefault();
+            cerrarModalNormas();
+            return;
+        }
+    }
+});
+
+// ===== BÚSQUEDA Y CONTROL POR CÓDIGO QR PARA TV =====
+let qrSearchChannel = null;
+
+function abrirModalBusquedaQR() {
+    const modal = document.getElementById('qr-search-modal');
+    const container = document.getElementById('qr-code-container');
+    if (!modal || !container) return;
+
+    // Generar un ID único de sesión de transmisión
+    const qrSessionId = 'qr_' + Math.floor(100000 + Math.random() * 900000);
+    const remoteUrl = `${window.location.origin}${window.location.pathname}?qr_remote=${qrSessionId}`;
+
+    // Generar imagen QR dinámica con la API pública de QR Code
+    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(remoteUrl)}&color=000000&bgcolor=ffffff`;
+    
+    container.innerHTML = `<img src="${qrApiUrl}" alt="QR Code" style="width: 180px; height: 180px; display: block; margin: 0 auto;">`;
+    modal.style.display = 'flex';
+
+    // Suscribirse al canal en tiempo real en Supabase
+    if (qrSearchChannel) _db.removeChannel(qrSearchChannel);
+
+    qrSearchChannel = _db.channel(`tv-search-${qrSessionId}`)
+        .on('broadcast', { event: 'remote-search' }, (payload) => {
+            if (payload && payload.query) {
+                const input = document.getElementById('busqueda');
+                if (input) {
+                    input.value = payload.query;
+                    cerrarModalBusquedaQR();
+                    if (typeof buscarAnime === 'function') buscarAnime();
+                }
+            }
+        })
+        .subscribe();
+}
+
+function cerrarModalBusquedaQR() {
+    const modal = document.getElementById('qr-search-modal');
+    if (modal) modal.style.display = 'none';
+    if (qrSearchChannel) {
+        _db.removeChannel(qrSearchChannel);
+        qrSearchChannel = null;
+    }
+}
+
+// ===== DETECTOR DEL MODO CONTROL REMOTO EN CELULAR (?qr_remote=ID) =====
+window.addEventListener('load', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const qrRemoteId = urlParams.get('qr_remote');
+
+    if (qrRemoteId) {
+        // Ocultar toda la web y mostrar interfaz minimalista de control remoto para el celular
+        document.body.innerHTML = `
+            <div style="background:#0b0b0b; color:#fff; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; font-family:sans-serif; text-align:center;">
+                <img src="logo-grande.png" style="width:140px; margin-bottom:20px;">
+                <h2 style="color:var(--gold); font-size:1.3rem; margin-bottom:10px;">📱 CONTROL DE BÚSQUEDA TV</h2>
+                <p style="color:#aaa; font-size:0.85rem; margin-bottom:20px;">Escribe el anime que quieres ver en tu Smart TV:</p>
+                <input type="text" id="remote-input" placeholder="Ej: Naruto, One Piece, Jujutsu..." 
+                       style="width:90%; max-width:350px; padding:15px; border-radius:12px; border:2px solid var(--gold); background:#141414; color:#fff; font-size:1.1rem; text-align:center; margin-bottom:15px; outline:none;">
+                <button onclick="enviarBusquedaATV('${qrRemoteId}')" 
+                        style="width:90%; max-width:350px; padding:15px; border-radius:25px; background:linear-gradient(135deg, #ffd700, #ffaa00); color:#000; font-weight:bold; font-size:1rem; border:none; cursor:pointer;">
+                    🚀 BUSCAR EN LA TV
+                </button>
+                <div id="remote-status" style="margin-top:15px; font-size:0.85rem; color:#00ff88;"></div>
+            </div>`;
+    }
+});
+
+async function enviarBusquedaATV(sessionId) {
+    const input = document.getElementById('remote-input');
+    const status = document.getElementById('remote-status');
+    if (!input || !input.value.trim()) return;
+
+    const query = input.value.trim();
+    if (status) status.innerText = "⏳ Enviando a la TV...";
+
+    const remoteChan = _db.channel(`tv-search-${sessionId}`);
+    await remoteChan.subscribe();
+    
+    remoteChan.send({
+        type: 'broadcast',
+        event: 'remote-search',
+        query: query
+    });
+
+    if (status) status.innerText = "✅ ¡Enviado con éxito a la TV!";
+    setTimeout(() => { if (status) status.innerText = ""; }, 3000);
 }

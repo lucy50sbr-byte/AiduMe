@@ -729,6 +729,7 @@ async function showDetails(a) {
         const isChecked = listaVistos.includes(i) ? 'checked' : '';
         html += `
             <div class="episode-row" data-ep="${i}" tabindex="0" 
+                 onfocus="this.scrollIntoView({behavior: 'smooth', block: 'center'})"
                  onkeydown="if(event.key==='Enter'){reproducirEpisodio('${nombreLimpio}', ${i});}">
                 <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                     <span class="play-icon">▶</span>
@@ -2203,19 +2204,46 @@ async function verificarRachaDias() {
 /**
  * Devuelve el HTML de la etiqueta de racha según los días
  */
-function obtenerHtmlRacha(dias) {
+function obtenerHtmlRacha(dias, esParaChat = false) {
     if (!dias || dias < 1) return "";
-    let imgNum = 1;
-    if (dias >= 3 && dias < 7) imgNum = 2;
-    else if (dias >= 7 && dias < 15) imgNum = 3;
-    else if (dias >= 15 && dias < 30) imgNum = 4;
-    else if (dias >= 30) imgNum = 5;
+    
+    let rangoTexto = "Racha: Bronce";
+    let fuegos = "🔥";
+    
+    if (dias >= 3 && dias < 7) {
+        rangoTexto = "Racha: Plata";
+        fuegos = "🔥🔥";
+    } else if (dias >= 7 && dias < 15) {
+        rangoTexto = "Racha: Oro";
+        fuegos = "🔥🔥🔥";
+    } else if (dias >= 15 && dias < 30) {
+        rangoTexto = "Racha: Platino";
+        fuegos = "✨🔥🔥🔥";
+    } else if (dias >= 30) {
+        rangoTexto = "Racha: Inmortal";
+        fuegos = "👑🔥🔥🔥🔥";
+    }
 
-    return `<span class="racha-item" title="Ver racha" 
-                  onclick="event.stopPropagation(); goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' });"
-                  style="cursor:pointer;">
-                <img src="insignias/racha${imgNum}.png" style="height:28px; vertical-align:middle;">
-            </span>`;
+    // 🟢 SI ES PARA EL CHAT: Devolvemos un formato ultra compacto sin rectángulos (CORREGIDO EL CLIC)
+    if (esParaChat) {
+        return `
+            <span class="chat-racha-inline" title="Racha activa de ${dias} días" 
+                  onclick="event.preventDefault(); event.stopPropagation(); setTimeout(() => { goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' }); }, 50);"
+                  style="cursor:pointer; font-size: 0.75rem; font-weight: bold; color: #ffd700; margin-left: 5px; user-select: none; display: inline-block;">
+                ${fuegos} <span style="font-size:0.65rem; opacity:0.9;">${dias}D</span>
+            </span>
+        `;
+    }
+
+    // 🟡 SI ES PARA EL PERFIL: Rectángulo grande animado estilo OWNER
+    return `
+        <div class="rank-tag rank-tag-animated" title="Ver racha" 
+             onclick="event.preventDefault(); event.stopPropagation(); setTimeout(() => { goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' }); }, 50);"
+             style="cursor:pointer; user-select: none;">
+            <span>${fuegos}</span>
+            <span>${rangoTexto.toUpperCase()} (${dias}D)</span>
+        </div>
+    `;
 }
 
 /**
@@ -3064,15 +3092,24 @@ async function renderizarComentarios(comentarios, contenedor) {
             const likeClass = x.usuarioDioLike ? 'like-btn-active' : 'like-btn-inactive';
             const likeIcon = x.usuarioDioLike ? '❤️' : '🤍';
 
+            // Obtener el rol del usuario para mostrar insignia en comentarios
+            const rolUsuarioComentario = perfilData?.rol || '';
+            const esRolEspecialComentario = ['admin', 'moderador', 'dueño'].includes(rolUsuarioComentario);
+            const rolBadgeHtmlComentario = esRolEspecialComentario ? 
+                `<span class="rol-badge comment-rol-badge ${rolUsuarioComentario === 'dueño' ? 'owner' : rolUsuarioComentario === 'admin' ? 'admin' : 'moderador'}">${rolUsuarioComentario === 'dueño' ? '👑' : rolUsuarioComentario === 'admin' ? '🛡️' : '🔍'} ${rolUsuarioComentario === 'dueño' ? 'OWNER' : rolUsuarioComentario === 'admin' ? 'ADMIN' : 'MOD'}</span>` : '';
+            
             d.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
                     <img src="${urlAvatar}" class="go-to-profile" data-user="${x.usuario}"
                          style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid ${esPremium ? 'var(--gold)' : '#333'}; background: #111; cursor: pointer; object-fit: cover;">
                     <div style="flex: 1;">
-                        <strong class="go-to-profile" data-user="${x.usuario}"
-                                style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
-                            @${x.usuario} ${esPremium ? '👑' : ''}
-                        </strong>
+                        <div style="display:flex; flex-direction:column; gap:3px;">
+                            ${rolBadgeHtmlComentario ? `<div style="align-self:flex-start;">${rolBadgeHtmlComentario}</div>` : ''}
+                            <strong class="go-to-profile" data-user="${x.usuario}"
+                                    style="color:${esPremium ? 'var(--gold)' : '#eee'}; font-size:0.8rem; display:block; cursor: pointer; width: fit-content;">
+                                @${x.usuario} ${esPremium ? '👑' : ''}
+                            </strong>
+                        </div>
                         <!-- PROCESADO INTERACTIVO DE SPOILERS Y STICKERS -->
                         <span style="font-size:0.9rem; color: #ccc; word-wrap: break-word; display: block; width: 100%; margin-top: 4px;">
                             ${procesarTextoComentario(x.comentario)}
@@ -4692,12 +4729,29 @@ async function reproducirEpisodio(titulo, num, segundos = 0) {
             if (infoText) {
                 urlTransmisionActual = urlFinal;
                 const flag = idiomaActual === 'lat' ? "banderas/mx.png" : "banderas/jp.png";
+                const tituloLimpio = titulo.replace(/'/g, "\\'");
+                const tieneAnterior = num > 1;
+
                 infoText.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left;">
-                        <span>📺 Viendo: ${titulo} - Ep ${num} <img src="${flag}" style="width:16px; vertical-align:middle;"></span>
-                        <button onclick="transmitirTV()" class="btn-cast-gold">
-                            <i>📡</i> TV
-                        </button>
+                    <div style="display:flex; flex-direction:column; gap:10px; width:100%; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                            <span>📺 Viendo: ${titulo} - Ep ${num} <img src="${flag}" style="width:16px; vertical-align:middle;"></span>
+                            <button onclick="transmitirTV()" class="btn-cast-gold" tabindex="0">
+                                <i>📡</i> TV
+                            </button>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
+                            <button onclick="reproducirEpisodio('${tituloLimpio}', ${num - 1})" 
+                                    tabindex="0" ${!tieneAnterior ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''} 
+                                    class="btn-random-gold" style="margin:0; padding:6px 14px; font-size:0.75rem;">
+                                ⏮️ Anterior
+                            </button>
+                            <button onclick="reproducirEpisodio('${tituloLimpio}', ${num + 1})" 
+                                    tabindex="0" class="btn-random-gold" 
+                                    style="margin:0; padding:6px 14px; font-size:0.75rem; background:linear-gradient(135deg, #00ff88, #00b359); color:#000; border-color:#00ff88; font-weight:bold;">
+                                Siguiente Ep. ⏭️
+                            </button>
+                        </div>
                     </div>`;
             }
         }, 200);
@@ -5604,12 +5658,18 @@ async function toggleChat() {
     }
 }
 
-// Cerrar chat al hacer clic fuera
+// Cerrar chat al hacer clic fuera (Ignorando modales de alerta emergentes y racha)
 window.addEventListener('click', (e) => {
     const win = document.getElementById('chat-window');
     const bubble = document.getElementById('chat-bubble');
     const picker = document.getElementById('global-emoji-picker');
     const stickerPicker = document.getElementById('global-sticker-picker');
+    const goldModal = document.getElementById('gold-modal');
+
+    // Si el modal de alerta 'gold-modal' está actualmente abierto o el clic proviene de él o de la racha, NO cerramos el chat
+    if ((goldModal && goldModal.style.display !== 'none') || e.target.closest('#gold-modal') || e.target.closest('.chat-racha-inline') || e.target.closest('.gold-modal-overlay') || e.target.closest('.modal-gold-overlay')) {
+        return;
+    }
 
     // Si el chat está abierto, cerramos solo si el clic NO es en la ventana, ni en la burbuja, ni en los selectores
     if (win?.style.display === 'flex' && !win.contains(e.target) && !bubble.contains(e.target) && (!picker || !picker.contains(e.target)) && (!stickerPicker || !stickerPicker.contains(e.target))) {
@@ -5689,7 +5749,7 @@ async function cargarMensajesChat() {
         .from('chat_global')
         .select(`
             id, usuario, mensaje, fecha, reply_to_json,
-            perfiles (avatar_id, es_premium, tema_chat, racha_dias, online, ultima_conexion)
+            perfiles (avatar_id, es_premium, tema_chat, racha_dias, online, ultima_conexion, rol)
         `)
         .gt('fecha', tiempoLimite)
         .order('fecha', { ascending: true });
@@ -5744,7 +5804,7 @@ async function cargarMensajesChat() {
                 const motivoAuto = `[AUTOMOD_CHAT] Mensaje ofensivo o link detectado automáticamente | Mensaje original: "${m.mensaje}" (Usuario: ${m.usuario})`;
                 
                 await _db.from('reportes').insert([{
-                    comentario_id: null, // O usar una columna específica si agregás chat_id en un futuro
+                    comentario_id: null,
                     usuario_reporta: "SISTEMA_AUTO_MOD",
                     motivo: motivoAuto
                 }]);
@@ -5799,6 +5859,12 @@ async function cargarMensajesChat() {
                 <button class="chat-action-btn" onclick="responderAMensaje(${m.id}, '${m.usuario}', '${m.mensaje.replace(/'/g, "\\'").replace(/"/g, '"')}', 'chat-input')" title="Responder">↩️</button>
             </div>`;
 
+        // Obtener el rol del usuario para mostrar insignia
+        const rolUsuario = perfilData?.rol || '';
+        const esRolEspecial = ['admin', 'moderador', 'dueño'].includes(rolUsuario);
+        const rolBadgeHtml = esRolEspecial ? 
+            `<span class="rol-badge chat-rol-badge ${rolUsuario === 'dueño' ? 'owner' : rolUsuario === 'admin' ? 'admin' : 'moderador'}">${rolUsuario === 'dueño' ? '👑' : rolUsuario === 'admin' ? '🛡️' : '🔍'} ${rolUsuario === 'dueño' ? 'OWNER' : rolUsuario === 'admin' ? 'ADMIN' : 'MOD'}</span>` : '';
+        
         const msgHtml = `
             <div class="chat-msg-row" data-msg-id="${m.id}" data-msg-table="chat_global">
                 <div style="position: relative; flex-shrink: 0;">
@@ -5808,10 +5874,16 @@ async function cargarMensajesChat() {
                     <span class="${esOnline ? 'online-dot' : 'offline-dot'}" style="position: absolute; top: -2px; right: -2px; border: 2px solid #111; margin: 0; box-sizing: content-box;"></span>
                 </div>
                 <div class="chat-msg-body ${temaClase}" style="${estiloPremium}">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <strong class="chat-user-name" onclick="verPerfilAjeno('${m.usuario}')" style="cursor:pointer; text-decoration:underline;">@${m.usuario}</strong>
-                        ${obtenerHtmlRacha(perfilData?.racha_dias)}
-                        <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat" ${esOfensivo ? 'disabled style="opacity:0.2;"' : ''}>🚩</button>
+                    <div style="display:flex; flex-direction:column; gap:3px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <!-- Bloque del nombre alineado horizontalmente con los fuegos minimalistas -->
+                            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                                <strong class="chat-user-name" onclick="verPerfilAjeno('${m.usuario}')" style="cursor:pointer; text-decoration:underline;">@${m.usuario}</strong>
+                                ${obtenerHtmlRacha(perfilData?.racha_dias, true)}
+                            </div>
+                            <button onclick="reportarMensajeChat(${m.id}, '${m.usuario}')" class="btn-report-chat" ${esOfensivo ? 'disabled style="opacity:0.2;"' : ''}>🚩</button>
+                        </div>
+                        ${rolBadgeHtml ? `<div style="align-self:flex-start; margin-top:1px; margin-bottom:2px;">${rolBadgeHtml}</div>` : ''}
                     </div>
                     ${replyHtml}
                     <div class="chat-text" style="color:${esOfensivo ? '#ff4757' : (esPremium ? 'var(--gold)' : 'white')}; font-size:0.9rem; font-style:${esOfensivo ? 'italic' : 'normal'}; font-weight:${esPremium ? 'bold' : 'normal'};">${textoMsj}</div>
@@ -5825,13 +5897,15 @@ async function cargarMensajesChat() {
             htmlNuevos += msgHtml;
         } else {
             container.insertAdjacentHTML('beforeend', msgHtml);
-            cargarReaccionesEnMensaje(m.id, 'chat_global');
+            if (typeof cargarReaccionesEnMensaje === 'function') cargarReaccionesEnMensaje(m.id, 'chat_global');
         }
     });
 
     if (esCargaInicial && htmlNuevos) {
         container.innerHTML = htmlNuevos;
-        mensajes.forEach(m => cargarReaccionesEnMensaje(m.id, 'chat_global'));
+        mensajes.forEach(m => {
+            if (typeof cargarReaccionesEnMensaje === 'function') cargarReaccionesEnMensaje(m.id, 'chat_global');
+        });
     }
 
     if (chatAbierto) {
@@ -5850,13 +5924,13 @@ async function cargarMensajesChat() {
             badge.style.display = "block";
         }
         if (mencionDetectada) {
-            reproducirSonidoChat();
-            lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
+            if (typeof reproducirSonidoChat === 'function') reproducirSonidoChat();
+            if (typeof lanzarNotificacionSistema === 'function') lanzarNotificacionSistema("💎 AIDUME: ¡TE MENCIONARON!", `Alguien te ha etiquetado en el chat global.`);
         }
     }
 }
 
-// Auto-actualizar el chat cada 10 segundos (siempre corre para ver notificaciones)
+// Auto-actualizar el chat cada 10 segundos
 setInterval(() => {
     cargarMensajesChat();
 }, 10000);
@@ -6196,7 +6270,8 @@ window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confi
         const btnConfirm = document.createElement('button');
         btnConfirm.innerText = confirmText;
         btnConfirm.style = "background:var(--gold); color:black; border:none; padding:12px 20px; border-radius:8px; font-weight:bold; cursor:pointer; flex:1; transition: 0.2s;";
-        btnConfirm.onclick = () => {
+        btnConfirm.onclick = (e) => {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
             const val = showInput ? input.value : true;
             modal.style.display = 'none';
             resolve(val);
@@ -6207,7 +6282,8 @@ window.goldAlert = function({ title = "AVISO", text = "", icon = "⚠️", confi
             const btnCancel = document.createElement('button');
             btnCancel.innerText = "CANCELAR";
             btnCancel.style = "background:transparent; color:#fff; border:1px solid #444; padding:12px 20px; border-radius:8px; cursor:pointer; flex:1;";
-            btnCancel.onclick = () => {
+            btnCancel.onclick = (e) => {
+                if (e) { e.preventDefault(); e.stopPropagation(); }
                 modal.style.display = 'none';
                 resolve(null); // Devolvemos null si cancela
             };
