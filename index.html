@@ -31,19 +31,6 @@
     </a>
 </header>
 
-    <div id="offline-overlay" style="display: none; position: fixed; inset: 0; background: rgba(11, 11, 11, 0.95); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(10px);">
-        <div class="auth-card" style="max-width: 420px; width: 90%; padding: 35px 25px; border-color: var(--gold); box-shadow: 0 0 30px rgba(255, 215, 0, 0.2);">
-            <div style="font-size: 3.5rem; margin-bottom: 10px;">📡</div>
-            <h2 style="color: var(--gold); font-size: 1.4rem; margin-bottom: 10px; font-weight: 900; letter-spacing: 1px;">SIN CONEXIÓN A INTERNET</h2>
-            <p style="color: #aaa; font-size: 0.85rem; line-height: 1.5; margin-bottom: 25px;">
-                No pudimos conectar con AiduMe. Por favor, verifica tu conexión a la red.
-            </p>
-            <button onclick="window.location.reload()" tabindex="0" class="btn-random-gold" style="width: 100%; padding: 14px; font-size: 0.95rem; font-weight: bold; cursor: pointer;">
-                🔄 REINTENTAR CONEXIÓN
-            </button>
-        </div>
-    </div>
-
     <div id="auth-overlay">
         <div class="auth-card">
             <img src="logo-grande.png" alt="Logo" style="width: 150px; margin-bottom: 20px;">
@@ -51,10 +38,7 @@
             
             <div id="reg-fields">
     <input type="text" id="reg-user" placeholder="Usuario" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
-    <div class="password-wrapper">
-        <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 100%; padding: 12px; border-radius: 10px; border: none; box-sizing: border-box;">
-        <span id="toggle-reg-pass" class="password-toggle-eye">👁️</span>
-    </div>
+    <input type="password" id="reg-pass" placeholder="Contraseña" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none;">
     
     <input type="email" id="reg-email" placeholder="Correo Electrónico" class="modern-input" style="width: 90%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; display: none;">
     
@@ -109,31 +93,9 @@
         </div>
 
         <div class="search-container">
-            <div class="modern-search-box" style="display:flex; gap:8px; align-items:center;">
+            <div class="modern-search-box">
                 <input type="text" id="busqueda" placeholder="Escribe para buscar..." oninput="buscarAnimeLive()">
-                <button onclick="buscarAnime()" id="btn-search-gold" tabindex="0"><span>🔍</span></button>
-                <button onclick="abrirModalBusquedaQR()" id="btn-qr-search" tabindex="0" title="Buscar con celular" class="btn-random-gold" style="margin:0; padding:10px 14px; white-space:nowrap; display:flex; align-items:center; gap:6px; font-size:0.8rem; background:rgba(255,215,0,0.1); border-color:var(--gold);">
-                    📱 <span>QR</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- MODAL DE BÚSQUEDA VÍA QR PARA TV Y MÓVIL -->
-        <div id="qr-search-modal" style="display: none; position: fixed; inset: 0; background: rgba(11, 11, 11, 0.95); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(10px);">
-            <div class="auth-card" style="max-width: 400px; width: 90%; padding: 30px 20px; border-color: var(--gold); text-align: center;">
-                <h3 style="color: var(--gold); font-size: 1.2rem; margin-bottom: 8px; font-weight: 900;">📱 ESCANEA PARA BUSCAR</h3>
-                <p style="color: #aaa; font-size: 0.8rem; margin-bottom: 15px;">
-                    Abre la cámara de tu celular o el escáner QR para escribir el nombre del anime fácilmente:
-                </p>
-                <div id="qr-code-container" style="background: #ffffff; padding: 15px; border-radius: 15px; display: inline-block; margin-bottom: 15px; box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);">
-                    <!-- Se inyecta la imagen QR -->
-                </div>
-                <div style="font-size: 0.75rem; color: #888; margin-bottom: 15px;">
-                    Esperando que escribas desde tu teléfono... <span style="color:var(--gold);" class="pulse-dot">🟢</span>
-                </div>
-                <button onclick="cerrarModalBusquedaQR()" tabindex="0" class="btn-random-gold" style="width: 100%; border-color: #ff4444; color: #ff4444;">
-                    CANCELAR
-                </button>
+                <button onclick="buscarAnime()" id="btn-search-gold"><span>🔍</span></button>
             </div>
         </div>
 
@@ -159,16 +121,16 @@
             </div>
         </div>
 
-        <!--<div id="seccion-continuar-viendo" style="display:none;">
+        <div id="seccion-continuar-viendo">
     <div class="section-header-gold">
         <h2 class="section-h">🎬 Continuar Viendo</h2>
     </div>
-    <div id="lista-continuar-viendo" class="continuar-viendo-grid"></div>
-</div>-->
+    <div id="lista-continuar-viendo" class="anime-grid"></div>
+</div>
 
         <div id="seccion-top-10">
     <div class="section-header-gold">
-        <h2 class="section-h">Top 10 mas vistos</h2>
+        <h2 class="section-h">Top 10 mas vistos de la temporada</h2>
     </div>
     <div class="scroll-wrapper">
         <div class="horizontal-scroll" id="lista-top-10"></div>
@@ -224,11 +186,12 @@
                 <div class="level-badge" id="display-level">1</div>
             </div>
             <h2 id="display-user">Usuario</h2>
-            <div id="display-rank">ASPIRANTE</div>
+            <div class="rank-tag" id="display-rank">ASPIRANTE</div>
             <p id="display-bio" onclick="editarBio()" style="font-style: italic; font-size: 0.85rem; color: #bbb; margin: 12px auto; cursor: pointer; max-width: 250px;">"Toca aquí para añadir tu frase..."</p>
         </div>
 
         <div class="profile-stats-row">
+            <div class="stat-item"><span class="stat-label">Vistos</span><span class="stat-value" id="stat-vistos">0</span></div>
             <div class="stat-item"><span class="stat-label">Miembro desde</span><span class="stat-value" id="stat-horas">--</span></div>
             <div class="stat-item clickable-stat" onclick="mostrarInfoFichas()"><span class="stat-label">Aidufichas</span><span class="stat-value" id="stat-fichas">0</span></div>
             <div class="stat-item"><span class="stat-label">Edad</span><span class="stat-value" id="display-age">--</span></div>
