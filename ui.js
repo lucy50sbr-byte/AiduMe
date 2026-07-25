@@ -547,7 +547,13 @@ async function showPage(pId) {
     // 3. LÓGICA DE CARGA SEGÚN LA PÁGINA
     switch(pId) {
         case 'home': cargarHome(); break;
-        case 'admin-panel': cargarComentariosAdmin(); break;
+        case 'admin-panel': 
+            cargarComentariosAdmin(); 
+            if (typeof cargarTicketsSoporte === 'function') {
+                cargarTicketsSoporte();
+                iniciarEscuchaSoporteAdmin();
+            }
+            break;
         case 'mis-listas': cargarListaDesdeSQL('favoritos', 'lista-favoritos', 'fecha_agregado'); break;
         case 'historial': cargarListaDesdeSQL('vistos', 'lista-historial', 'fecha_visto'); break;
         case 'calendario': cargarCalendario(); break;
@@ -1705,3 +1711,4 @@ async function enviarBusquedaATV(sessionId) {
     if (status) status.innerText = "✅ ¡Enviado con éxito a la TV!";
     setTimeout(() => { if (status) status.innerText = ""; }, 3000);
 }
+

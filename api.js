@@ -371,7 +371,9 @@ async function initApp() {
         { id: 'comment-input', fn: postearComentario },
         { id: 'privado-input', fn: enviarMensajePrivado },
         { id: 'wp-input-msg', fn: enviarMsgWatchParty },
-        { id: 'input-bio-nueva', fn: guardarNuevaBio }
+        { id: 'input-bio-nueva', fn: guardarNuevaBio },
+        { id: 'soporte-input', fn: enviarMensajeSoporte },
+        { id: 'admin-soporte-input', fn: responderTicketSoporte }
     ];
 
     inputsEnter.forEach(item => {
@@ -6694,3 +6696,474 @@ async function guardarAmigosData(usuario, dataAmigos) {
         throw err;
     }
 }
+
+// =====================================================================
+// SISTEMA DE CHAT DE SOPORTE AIDUME
+// =====================================================================
+
+// Variable global para la suscripción Realtime del soporte
+let soporteSubscription = null;
+
+/**
+ * Abre/cierra el chat flotante de soporte para el usuario
+ */
+function abrirSoporte() {
+    if (!currentUser) {
+        return goldAlert({ title: "INICIA SESIÓN", text: "Debes iniciar sesión para contactar con soporte.", icon: "👤" });
+    }
+    
+    const container = document.getElementById('soporte-chat-container');
+    const badge = document.getElementById('soporte-badge');
+    
+    if (container.style.display === 'flex') {
+        cerrarChatSoporte();
+        return;
+    }
+    
+    container.style.display = 'flex';
+    if (badge) badge.style.display = 'none';
+    
+    // Cargar mensajes previos
+    cargarMensajesSoporte();
+}
+
+function cerrarChatSoporte() {
+    const container = document.getElementById('soporte-chat-container');
+    if (container) container.style.display = 'none';
+    
+    // Desuscribirse del canal Realtime al cerrar
+    if (soporteSubscription) {
+        _db.removeChannel(soporteSubscription);
+        soporteSubscription = null;
+    }
+}
+
+/**
+ * Envía un mensaje del usuario a la tabla soporte_mensajes
+ */
+async function enviarMensajeSoporte() {
+    const input = document.getElementById('soporte-input');
+    const texto = input.value.trim();
+    if (!texto || !currentUser) return;
+    
+    // Limpiar input inmediatamente
+    input.value = "";
+    
+    try {
+        const { error } = await _db.from('soporte_mensajes').insert([{
+            usuario: currentUser,
+            mensaje: texto,
+            es_admin: false,
+            leido_por_admin: false
+        }]);
+        
+        if (error) throw error;
+        
+        // Recargar mensajes
+        cargarMensajesSoporte();
+        
+    } catch (err) {
+        console.error("Error al enviar mensaje de soporte:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo enviar el mensaje. Intenta de nuevo.", icon: "❌" });
+    }
+}
+
+/**
+ * Carga los mensajes de soporte del usuario actual
+ */
+async function cargarMensajesSoporte() {
+    const container = document.getElementById('soporte-mensajes');
+    if (!container || !currentUser) return;
+    
+    try {
+        const { data, error } = await _db
+            .from('soporte_mensajes')
+            .select('*')
+            .ilike('usuario', currentUser)
+            .order('fecha', { ascending: true });
+        
+        if (error) throw error;
+        
+        if (!data || data.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center; margin-top:30px; opacity:0.6;">
+                    <div style="font-size:2rem; margin-bottom:10px;">🛟</div>
+                    <p style="font-size:0.8rem; color:#aaa;">Bienvenido al Soporte de AiduMe</p>
+                    <p style="font-size:0.7rem; color:#777;">Describe tu problema y un administrador te responderá a la brevedad.</p>
+                </div>`;
+            return;
+        }
+        
+        // Renderizar mensajes
+        container.innerHTML = data.map(m => {
+            const esAdmin = m.es_admin === true;
+            const esMio = String(m.usuario).trim().toLowerCase() === String(currentUser).trim().toLowerCase();
+            
+            // Si es admin, el remitente es "Soporte AiduMe"
+            const nombreRemitente = esAdmin ? '🛟 Soporte' : '@' + m.usuario;
+            const nombreUsuario = esMio ? 'Tú' : nombreRemitente;
+            
+            return `
+                <div style="display:flex; flex-direction:column; align-items:${esMio ? 'flex-end' : 'flex-start'};">
+                    <div style="font-size:0.6rem; color:#888; margin-bottom:2px; padding:0 4px;">${nombreUsuario}</div>
+                    <div style="background:${esAdmin ? 'rgba(155,89,182,0.2)' : 'rgba(255,255,255,0.08)'}; 
+                                border:1px solid ${esAdmin ? 'rgba(155,89,182,0.4)' : 'rgba(255,255,255,0.1)'};
+                                color:${esAdmin ? '#c084fc' : '#eee'};
+                                border-radius:${esMio ? '12px 12px 4px 12px' : '12px 12px 12px 4px'};
+                                padding:8px 12px; max-width:85%; font-size:0.8rem;">
+                        ${m.mensaje}
+                    </div>
+                    <div style="font-size:0.55rem; color:#555; margin-top:2px; padding:0 4px;">
+                        ${new Date(m.fecha).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                </div>`;
+        }).join('');
+        
+        // Scroll al último mensaje
+        container.scrollTop = container.scrollHeight;
+        
+        // Marcar como leídos los mensajes de admin para este usuario
+        await marcarSoporteLeido();
+        
+        // Suscribirse a nuevos mensajes en tiempo real
+        escucharSoporteEnVivo();
+        
+    } catch (err) {
+        console.error("Error al cargar mensajes de soporte:", err);
+        container.innerHTML = '<p style="text-align:center; color:#ff4444; font-size:0.7rem;">Error al cargar el chat</p>';
+    }
+}
+
+/**
+ * Escucha nuevos mensajes de soporte en tiempo real (solo del usuario actual)
+ */
+function escucharSoporteEnVivo() {
+    if (!currentUser) return;
+    
+    // Limpiar suscripción anterior
+    if (soporteSubscription) {
+        _db.removeChannel(soporteSubscription);
+        soporteSubscription = null;
+    }
+    
+    soporteSubscription = _db.channel('soporte-en-vivo-' + currentUser)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'soporte_mensajes',
+            filter: `usuario=ilike.${currentUser}`
+        }, (payload) => {
+            const m = payload.new;
+            if (!m) return;
+            
+            const container = document.getElementById('soporte-mensajes');
+            if (!container) return;
+            
+            // Si el chat está cerrado, mostrar badge de notificación
+            const chatContainer = document.getElementById('soporte-chat-container');
+            if (chatContainer && chatContainer.style.display !== 'flex') {
+                const badge = document.getElementById('soporte-badge');
+                if (badge && m.es_admin) {
+                    badge.style.display = 'flex';
+                    badge.innerText = '1';
+                }
+                return;
+            }
+            
+            // Renderizar el nuevo mensaje
+            const esAdmin = m.es_admin === true;
+            const esMio = String(m.usuario).trim().toLowerCase() === String(currentUser).trim().toLowerCase();
+            
+            // Si es mensaje vacío o de bienvenida del sistema, mostrarlo
+            const nombreUsuario = esAdmin ? '🛟 Soporte' : (esMio ? 'Tú' : '@' + m.usuario);
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.style.cssText = 'display:flex; flex-direction:column; align-items:' + (esMio ? 'flex-end' : 'flex-start') + ';';
+            msgDiv.innerHTML = `
+                <div style="font-size:0.6rem; color:#888; margin-bottom:2px; padding:0 4px;">${nombreUsuario}</div>
+                <div style="background:${esAdmin ? 'rgba(155,89,182,0.2)' : 'rgba(255,255,255,0.08)'}; 
+                            border:1px solid ${esAdmin ? 'rgba(155,89,182,0.4)' : 'rgba(255,255,255,0.1)'};
+                            color:${esAdmin ? '#c084fc' : '#eee'};
+                            border-radius:${esMio ? '12px 12px 4px 12px' : '12px 12px 12px 4px'};
+                            padding:8px 12px; max-width:85%; font-size:0.8rem;">
+                    ${m.mensaje}
+                </div>
+                <div style="font-size:0.55rem; color:#555; margin-top:2px; padding:0 4px;">
+                    ${new Date(m.fecha).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </div>`;
+            
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        })
+        .subscribe();
+}
+
+/**
+ * Marca los mensajes del usuario como leídos por el admin (se ejecuta cuando el admin abre la conversación)
+ */
+async function marcarSoporteLeido() {
+    // Esta función marca los mensajes del admin como "leídos por el usuario"
+    // No es necesario hacer nada aquí porque la vista se actualiza sola
+}
+
+/**
+ * ==========================================================
+ * FUNCIONES PARA EL PANEL DE ADMINISTRACIÓN
+ * ==========================================================
+ */
+
+/**
+ * Carga la lista de usuarios que han enviado tickets de soporte en el panel admin
+ */
+async function cargarTicketsSoporte() {
+    const container = document.getElementById('admin-soporte-tickets');
+    if (!container) return;
+    
+    try {
+        // Obtener los últimos mensajes agrupados por usuario (el mensaje más reciente de cada uno)
+        const { data, error } = await _db
+            .from('soporte_mensajes')
+            .select('*')
+            .order('fecha', { ascending: false });
+        
+        if (error) throw error;
+        
+        if (!data || data.length === 0) {
+            container.innerHTML = '<p style="text-align:center; opacity:0.5; font-size:0.75rem; padding:20px;">No hay tickets de soporte aún.</p>';
+            document.getElementById('soporte-ticket-count').innerText = '';
+            return;
+        }
+        
+        // Agrupar por usuario y obtener el último mensaje de cada uno
+        const usuariosMap = new Map();
+        data.forEach(m => {
+            const usuario = String(m.usuario).trim().toLowerCase();
+            if (!usuariosMap.has(usuario)) {
+                usuariosMap.set(usuario, { 
+                    usuario: m.usuario, 
+                    ultimoMensaje: m.mensaje, 
+                    fecha: m.fecha, 
+                    noLeido: !m.leido_por_admin,
+                    totalMensajes: 1
+                });
+            } else {
+                const existing = usuariosMap.get(usuario);
+                existing.totalMensajes++;
+                // Actualizar el último mensaje si la fecha es más reciente
+                if (new Date(m.fecha) > new Date(existing.fecha)) {
+                    existing.ultimoMensaje = m.mensaje;
+                    existing.fecha = m.fecha;
+                }
+                if (!m.leido_por_admin) existing.noLeido = true;
+            }
+        });
+        
+        const tickets = Array.from(usuariosMap.values());
+        const noLeidos = tickets.filter(t => t.noLeido).length;
+        
+        // Mostrar contador
+        const countBadge = document.getElementById('soporte-ticket-count');
+        if (countBadge) {
+            countBadge.innerText = noLeidos > 0 ? `🔴 ${noLeidos} sin leer` : '';
+        }
+        
+        // Renderizar lista de tickets
+        container.innerHTML = tickets.map(t => {
+            const esNoLeido = t.noLeido;
+            const fecha = new Date(t.fecha);
+            const fechaStr = fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            const preview = t.ultimoMensaje.length > 50 ? t.ultimoMensaje.substring(0, 50) + '...' : t.ultimoMensaje;
+            
+            return `
+                <div onclick="abrirConversacionSoporte('${t.usuario}')" 
+                     style="display:flex; align-items:center; gap:10px; background:${esNoLeido ? 'rgba(155,89,182,0.12)' : 'rgba(255,255,255,0.03)'}; 
+                            border:1px solid ${esNoLeido ? 'rgba(155,89,182,0.3)' : 'rgba(255,255,255,0.05)'}; 
+                            border-radius:10px; padding:10px; cursor:pointer; transition:0.2s;
+                            ${esNoLeido ? 'border-left: 4px solid #9b59b6;' : ''}"
+                     onmouseenter="this.style.background='rgba(155,89,182,0.15)'"
+                     onmouseleave="this.style.background='${esNoLeido ? 'rgba(155,89,182,0.12)' : 'rgba(255,255,255,0.03)'}'">
+                    <div style="width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,#8e44ad,#9b59b6); 
+                                display:flex; align-items:center; justify-content:center; font-size:0.9rem; flex-shrink:0;">
+                        👤
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-weight:bold; font-size:0.8rem; color:${esNoLeido ? '#c084fc' : '#eee'};">@${t.usuario}</span>
+                            <span style="font-size:0.6rem; color:#777;">${fechaStr}</span>
+                        </div>
+                        <div style="font-size:0.7rem; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">
+                            ${esNoLeido ? '🔴 ' : ''}${preview}
+                        </div>
+                        <div style="font-size:0.6rem; color:#666; margin-top:2px;">${t.totalMensajes} mensajes</div>
+                    </div>
+                </div>`;
+        }).join('');
+        
+    } catch (err) {
+        console.error("Error al cargar tickets de soporte:", err);
+        container.innerHTML = '<p style="text-align:center; color:#ff4444; font-size:0.7rem;">Error al cargar tickets</p>';
+    }
+}
+
+/**
+ * Abre la conversación de un usuario específico en el panel admin
+ */
+async function abrirConversacionSoporte(usuario) {
+    const conversacion = document.getElementById('admin-soporte-conversacion');
+    const usuarioLabel = document.getElementById('admin-soporte-usuario-actual');
+    const msgsContainer = document.getElementById('admin-soporte-msgs');
+    
+    if (!conversacion || !usuarioLabel || !msgsContainer) return;
+    
+    usuarioLabel.innerText = `💬 Conversación con @${usuario}`;
+    conversacion.style.display = 'block';
+    
+    // Guardar el nombre del usuario en un data attribute para usarlo al responder
+    conversacion.dataset.usuarioActual = usuario;
+    
+    try {
+        const { data, error } = await _db
+            .from('soporte_mensajes')
+            .select('*')
+            .ilike('usuario', usuario)
+            .order('fecha', { ascending: true });
+        
+        if (error) throw error;
+        
+        if (!data || data.length === 0) {
+            msgsContainer.innerHTML = '<p style="text-align:center; opacity:0.5; font-size:0.7rem;">Sin mensajes</p>';
+            return;
+        }
+        
+        // Renderizar mensajes
+        msgsContainer.innerHTML = data.map(m => {
+            const esAdmin = m.es_admin === true;
+            const esDelUsuario = !esAdmin;
+            
+            let nombre = '';
+            let bgColor = '';
+            let borderColor = '';
+            let textColor = '';
+            let alineacion = '';
+            let borderRadius = '';
+            
+            if (esAdmin) {
+                nombre = '🛟 Tú (Soporte)';
+                bgColor = 'rgba(155,89,182,0.2)';
+                borderColor = 'rgba(155,89,182,0.4)';
+                textColor = '#c084fc';
+                alineacion = 'flex-end';
+                borderRadius = '12px 12px 4px 12px';
+            } else {
+                nombre = '@' + m.usuario;
+                bgColor = 'rgba(255,255,255,0.08)';
+                borderColor = 'rgba(255,255,255,0.1)';
+                textColor = '#eee';
+                alineacion = 'flex-start';
+                borderRadius = '12px 12px 12px 4px';
+            }
+            
+            return `
+                <div style="display:flex; flex-direction:column; align-items:${alineacion};">
+                    <div style="font-size:0.6rem; color:#888; margin-bottom:2px;">${nombre}</div>
+                    <div style="background:${bgColor}; border:1px solid ${borderColor}; color:${textColor};
+                                border-radius:${borderRadius}; padding:8px 12px; max-width:85%; font-size:0.8rem;">
+                        ${m.mensaje}
+                    </div>
+                    <div style="font-size:0.55rem; color:#555; margin-top:2px;">
+                        ${new Date(m.fecha).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                </div>`;
+        }).join('');
+        
+        msgsContainer.scrollTop = msgsContainer.scrollHeight;
+        
+        // Marcar mensajes como leídos por admin
+        await _db.from('soporte_mensajes')
+            .update({ leido_por_admin: true })
+            .ilike('usuario', usuario)
+            .eq('leido_por_admin', false);
+        
+        // Recargar lista de tickets para actualizar badge
+        cargarTicketsSoporte();
+        
+    } catch (err) {
+        console.error("Error al cargar conversación:", err);
+        msgsContainer.innerHTML = '<p style="text-align:center; color:#ff4444; font-size:0.7rem;">Error al cargar</p>';
+    }
+}
+
+/**
+ * El admin responde un ticket de soporte
+ */
+async function responderTicketSoporte() {
+    const conversacion = document.getElementById('admin-soporte-conversacion');
+    const input = document.getElementById('admin-soporte-input');
+    const texto = input.value.trim();
+    const usuario = conversacion ? conversacion.dataset.usuarioActual : null;
+    
+    if (!texto || !usuario) return;
+    
+    input.value = "";
+    
+    try {
+        const { error } = await _db.from('soporte_mensajes').insert([{
+            usuario: usuario,
+            mensaje: texto,
+            es_admin: true,
+            leido_por_admin: true
+        }]);
+        
+        if (error) throw error;
+        
+        // Recargar conversación
+        abrirConversacionSoporte(usuario);
+        
+    } catch (err) {
+        console.error("Error al responder ticket:", err);
+        goldAlert({ title: "ERROR", text: "No se pudo enviar la respuesta.", icon: "❌" });
+    }
+}
+
+function cerrarSoporteConversacion() {
+    const conversacion = document.getElementById('admin-soporte-conversacion');
+    if (conversacion) conversacion.style.display = 'none';
+}
+
+/**
+ * Inicializa la escucha de soporte para el panel admin (se llama al cargar admin-panel)
+ */
+function iniciarEscuchaSoporteAdmin() {
+    // Escuchar nuevos mensajes de soporte para actualizar el panel en tiempo real
+    const soporteAdminChannel = _db.channel('soporte-admin-global')
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'soporte_mensajes' 
+        }, (payload) => {
+            const m = payload.new;
+            if (m && !m.es_admin) {
+                // Recargar lista de tickets si el panel admin está visible
+                const adminPanel = document.getElementById('admin-panel');
+                if (adminPanel && adminPanel.classList.contains('active-page')) {
+                    cargarTicketsSoporte();
+                    
+                    // Si la conversación del mismo usuario está abierta, recargarla
+                    const conversacion = document.getElementById('admin-soporte-conversacion');
+                    if (conversacion && conversacion.style.display === 'block') {
+                        const usuarioActual = conversacion.dataset.usuarioActual;
+                        if (usuarioActual && String(m.usuario).trim().toLowerCase() === String(usuarioActual).trim().toLowerCase()) {
+                            abrirConversacionSoporte(usuarioActual);
+                        }
+                    }
+                }
+            }
+        })
+        .subscribe();
+    
+    return soporteAdminChannel;
+}
+
+// Override en showPage para cargar tickets de soporte al abrir el panel admin
+// (ya existe la función showPage en ui.js, agregamos la lógica en el switch)
+// Esto se maneja llamando a cargarTicketsSoporte desde el switch de showPage
