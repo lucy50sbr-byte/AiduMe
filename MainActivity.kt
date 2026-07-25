@@ -52,6 +52,32 @@ class MainActivity : ComponentActivity() {
                 userAgentString = userAgentString + " AiduMeTV"
                 mediaPlaybackRequiresUserGesture = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                
+                // Configuración específica para Android TV
+                setSupportZoom(false)
+                builtInZoomControls = false
+                displayZoomControls = false
+            }
+            
+            // Manejo de focus para Android TV
+            setOnKeyListener { _, keyCode, event ->
+                if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                    // Permitir navegación con D-pad
+                    when (keyCode) {
+                        android.view.KeyEvent.KEYCODE_DPAD_UP,
+                        android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+                        android.view.KeyEvent.KEYCODE_ENTER,
+                        android.view.KeyEvent.KEYCODE_DPAD_CENTER -> {
+                            // Dejar que el WebView maneje estos eventos
+                            false
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
             }
 
             webViewClient = object : WebViewClient() {

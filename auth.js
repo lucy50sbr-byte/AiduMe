@@ -253,9 +253,9 @@ async function checkUser() {
             // --- AQUÍ SE DISPARA TU SECCIÓN AL CARGAR LA PÁGINA ---
             if (currentUser) {
                 // El retraso de 300ms evita conflictos con otras funciones de renderizado inicial
-                setTimeout(async () => {
-                    await cargarSeccionContinuarViendo();
-                }, 300);
+                // setTimeout(async () => {
+                //     await cargarSeccionContinuarViendo(); // TEMPORALMENTE DESACTIVADO
+                // }, 300);
             }
             
         } catch (e) {
@@ -674,8 +674,16 @@ function cerrarSesionTV() {
     location.reload();
 }
 
+// Detectar modo TV desde parámetro URL (Android TV app)
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('tv') === '1') {
+    document.documentElement.classList.add('tv-device');
+    localStorage.setItem('hide_chat', 'true');
+    console.log("📺 Modo TV activado desde parámetro URL");
+}
+
 // Si se detecta TV, ocultar el chat y mostrar login rápido
-if (esDispositivoTV()) {
+if (esDispositivoTV() || urlParams.get('tv') === '1') {
     localStorage.setItem('hide_chat', 'true');
     console.log("📺 Dispositivo TV detectado: Chat oculto automáticamente.");
 

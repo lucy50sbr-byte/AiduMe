@@ -316,10 +316,12 @@ function parsearMensajeParaStickers(texto) {
 }
 
 async function initApp() {
+    console.log("🚀 [initApp] Iniciando aplicación...");
     currentDayString = getTodayString(); // Initialize current day string
     await cargarDuelo();
+    console.log("🏠 [initApp] Llamando a cargarHome...");
     cargarHome();
-    renderContinuarViendo(); // Cargar sección "Continuar viendo"
+    // renderContinuarViendo(); // TEMPORALMENTE DESACTIVADO - Sección Continuar Viendo
     cargarUltimosEpisodios();
     cargarTodosLosAnimes(1); // Carga inicial de la lista completa
     cargarGenerosEnPanel();
@@ -440,16 +442,21 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function cargarHome() {
-    const lista = document.getElementById('lista');
+    const lista = document.getElementById('lista-top-10');
+    console.log("🏠 [Top 10] Elemento 'lista-top-10' encontrado:", !!lista);
     if (!lista) return;
 
     try {
+        console.log("🏠 [Top 10] Iniciando carga...");
+        
         // 1. Traer TODOS los perfiles y sumar los log_vistos para contar por anime
         const { data: perfiles, error } = await _db
             .from('perfiles')
             .select('log_vistos');
 
         if (error) throw error;
+
+        console.log("👥 [Top 10] Perfiles obtenidos:", perfiles?.length || 0);
 
         if (!perfiles || perfiles.length === 0) {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
@@ -468,6 +475,8 @@ async function cargarHome() {
             }
         });
 
+        console.log("📊 [Top 10] Conteo de vistas por anime:", conteo);
+
         if (Object.keys(conteo).length === 0) {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
             return;
@@ -479,8 +488,12 @@ async function cargarHome() {
             .slice(0, 10)
             .map(e => parseInt(e[0]));
 
+        console.log("🏆 [Top 10] IDs del Top 10:", top10Ids);
+
         // 4. Obtener metadata en paralelo por lotes (RÁPIDO)
         const metadataMap = await fetchJikanBatch(top10Ids);
+        console.log("📦 [Top 10] Metadata obtenida:", Object.keys(metadataMap).length);
+        
         const animes = top10Ids
             .filter(id => metadataMap[id])
             .map(id => {
@@ -489,14 +502,19 @@ async function cargarHome() {
                 return data;
             });
 
+        console.log("🎬 [Top 10] Animes a renderizar:", animes.length);
+        console.log("🎬 [Top 10] Datos de animes:", animes);
+
         if (animes.length > 0) {
-            renderGrid(animes, 'lista');
+            console.log("🎬 [Top 10] Llamando a renderGrid con 'lista-top-10'...");
+            renderGrid(animes, 'lista-top-10');
+            console.log("🎬 [Top 10] renderGrid ejecutado");
         } else {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los animes más vistos.</p>';
         }
 
     } catch (e) {
-        console.error("Error en cargarHome:", e);
+        console.error("❌ Error en cargarHome:", e);
         lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
     }
 }
@@ -703,6 +721,7 @@ async function showDetails(a) {
         const isChecked = listaVistos.includes(i) ? 'checked' : '';
         html += `
             <div class="episode-row" data-ep="${i}" tabindex="0" 
+                 onfocus="this.scrollIntoView({behavior: 'smooth', block: 'center'})"
                  onkeydown="if(event.key==='Enter'){reproducirEpisodio('${nombreLimpio}', ${i});}">
                 <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                     <span class="play-icon">▶</span>
@@ -2175,20 +2194,38 @@ async function verificarRachaDias() {
 }
 
 /**
- * Devuelve el HTML de la etiqueta de racha según los días
+ * Devuelve el HTML de la etiqueta de racha según los días (con CSS en lugar de imágenes)
  */
 function obtenerHtmlRacha(dias) {
     if (!dias || dias < 1) return "";
-    let imgNum = 1;
-    if (dias >= 3 && dias < 7) imgNum = 2;
-    else if (dias >= 7 && dias < 15) imgNum = 3;
-    else if (dias >= 15 && dias < 30) imgNum = 4;
-    else if (dias >= 30) imgNum = 5;
+    
+    let rangoTexto = "BRONCE";
+    let fuegos = "🔥";
+    let claseRacha = "racha-bronce";
+    
+    if (dias >= 3 && dias < 7) {
+        rangoTexto = "PLATA";
+        fuegos = "🔥🔥";
+        claseRacha = "racha-plata";
+    } else if (dias >= 7 && dias < 15) {
+        rangoTexto = "ORO";
+        fuegos = "🔥🔥🔥";
+        claseRacha = "racha-oro";
+    } else if (dias >= 15 && dias < 30) {
+        rangoTexto = "PLATINO";
+        fuegos = "✨🔥🔥🔥";
+        claseRacha = "racha-platino";
+    } else if (dias >= 30) {
+        rangoTexto = "INMORTAL";
+        fuegos = "👑🔥🔥🔥🔥";
+        claseRacha = "racha-inmortal";
+    }
 
-    return `<span class="racha-item" title="Ver racha" 
+    return `<span class="racha-badge ${claseRacha}" title="Ver racha" 
                   onclick="event.stopPropagation(); goldAlert({ title: 'RACHA ACTIVA', text: '¡Este usuario tiene una racha de ${dias} días consecutivos!', icon: '🔥' });"
                   style="cursor:pointer;">
-                <img src="insignias/racha${imgNum}.png" style="height:28px; vertical-align:middle;">
+                <span class="racha-fuegos">${fuegos}</span>
+                <span class="racha-texto">${rangoTexto} (${dias}D)</span>
             </span>`;
 }
 
@@ -2426,7 +2463,25 @@ async function calcularEstadisticasVisualizacion(nombreUsuario) {
             const eps = logVistos[animeId];
             if (Array.isArray(eps)) {
                 totalEpisodios += eps.length;
-                if (eps.length > 0) animesCompletados++;
+                
+                // Verificar si el último episodio visto es el último del anime
+                if (eps.length > 0) {
+                    const ultimoEpVisto = Math.max(...eps);
+                    // Obtener total de episodios del anime desde Jikan
+                    try {
+                        const res = await fetch(`https://api.jikan.moe/v4/anime/${animeId}`);
+                        const data = await res.json();
+                        const totalEpsAnime = data.data?.episodes;
+                        
+                        // Si el último episodio visto es igual al total del anime, contar como completado
+                        if (totalEpsAnime && ultimoEpVisto >= totalEpsAnime) {
+                            animesCompletados++;
+                        }
+                    } catch (err) {
+                        // Si falla la API, contar como completado si tiene al menos 1 episodio (comportamiento anterior)
+                        animesCompletados++;
+                    }
+                }
             }
         }
 

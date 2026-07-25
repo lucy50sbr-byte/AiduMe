@@ -628,15 +628,24 @@ header {
 }
 
 .episode-row:focus {
-    outline: 3px solid var(--gold) !important;
-    background: rgba(255, 215, 0, 0.15) !important;
+    outline: 4px solid var(--gold) !important;
+    background: rgba(255, 215, 0, 0.2) !important;
     border-left-color: var(--gold) !important;
     transform: translateX(8px);
-    box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+    box-shadow: 0 0 25px rgba(255, 215, 0, 0.5);
+    z-index: 10;
 }
 
 .episode-row:focus-visible {
-    outline: 3px solid var(--gold) !important;
+    outline: 4px solid var(--gold) !important;
+}
+
+/* Mejorar focus para Android TV específicamente */
+.tv-device .episode-row:focus {
+    outline: 5px solid var(--gold) !important;
+    background: rgba(255, 215, 0, 0.25) !important;
+    transform: scale(1.02);
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.6);
 }
 
 /* Focus visible para TV con D-pad - afecta a todos los elementos interactivos */
@@ -2651,6 +2660,131 @@ header {
     border: 2px solid var(--gold);
     text-align: center;
     box-shadow: 0 0 30px rgba(255, 215, 0, 0.2);
+}
+
+/* --- SISTEMA DE RANGOS (ADMIN/MOD/OWNER) --- */
+.rol-badge.profile-rol-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-left: 8px;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+    animation: badgePulse 2s infinite;
+}
+
+.rol-badge.profile-rol-badge.owner {
+    background: linear-gradient(135deg, #ffd700, #ffaa00);
+    color: #000;
+    border: 2px solid #ffd700;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+}
+
+.rol-badge.profile-rol-badge.admin {
+    background: linear-gradient(135deg, #ff4444, #cc0000);
+    color: #fff;
+    border: 2px solid #ff4444;
+    box-shadow: 0 0 20px rgba(255, 68, 68, 0.5);
+}
+
+.rol-badge.profile-rol-badge.moderador {
+    background: linear-gradient(135deg, #4488ff, #0055ff);
+    color: #fff;
+    border: 2px solid #4488ff;
+    box-shadow: 0 0 20px rgba(68, 136, 255, 0.5);
+}
+
+@keyframes badgePulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+/* --- SISTEMA DE RACHAS CON CSS --- */
+.racha-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 15px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 0.75rem;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+    animation: rachaShine 3s infinite;
+}
+
+.racha-fuegos {
+    font-size: 0.9rem;
+}
+
+.racha-texto {
+    font-size: 0.7rem;
+}
+
+/* Racha Bronce (1-2 días) */
+.racha-badge.racha-bronce {
+    background: linear-gradient(135deg, #cd7f32, #8b4513);
+    color: #fff;
+    border: 2px solid #cd7f32;
+    box-shadow: 0 0 15px rgba(205, 127, 50, 0.4);
+}
+
+/* Racha Plata (3-6 días) */
+.racha-badge.racha-plata {
+    background: linear-gradient(135deg, #c0c0c0, #808080);
+    color: #000;
+    border: 2px solid #c0c0c0;
+    box-shadow: 0 0 15px rgba(192, 192, 192, 0.5);
+}
+
+/* Racha Oro (7-14 días) */
+.racha-badge.racha-oro {
+    background: linear-gradient(135deg, #ffd700, #ffaa00);
+    color: #000;
+    border: 2px solid #ffd700;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
+}
+
+/* Racha Platino (15-29 días) */
+.racha-badge.racha-platino {
+    background: linear-gradient(135deg, #e5e4e2, #a0a0a0);
+    color: #000;
+    border: 2px solid #e5e4e2;
+    box-shadow: 0 0 25px rgba(229, 228, 226, 0.7);
+}
+
+/* Racha Inmortal (30+ días) */
+.racha-badge.racha-inmortal {
+    background: linear-gradient(135deg, #ffd700, #ff4500, #9400d3);
+    color: #fff;
+    border: 2px solid #ffd700;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+    animation: rachaInmortal 2s infinite;
+}
+
+@keyframes rachaShine {
+    0%, 100% { 
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+    }
+    50% { 
+        box-shadow: 0 0 25px rgba(255, 215, 0, 0.4);
+    }
+}
+
+@keyframes rachaInmortal {
+    0%, 100% { 
+        box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+        transform: scale(1);
+    }
+    50% { 
+        box-shadow: 0 0 40px rgba(255, 69, 0, 0.9);
+        transform: scale(1.05);
+    }
 }
 
 /* --- SISTEMA DE RACHAS --- */
