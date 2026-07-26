@@ -723,7 +723,7 @@ async function showDetails(a) {
         const isChecked = listaVistos.includes(i) ? 'checked' : '';
         html += `
             <div class="episode-row" data-ep="${i}" tabindex="0" 
-                 onfocus="this.scrollIntoView({behavior: 'smooth', block: 'center'})"
+                 onfocus="console.log('🎯 Focus en episodio ${i}'); this.scrollIntoView({behavior: 'smooth', block: 'center'});"
                  onkeydown="if(event.key==='Enter'){reproducirEpisodio('${nombreLimpio}', ${i});}">
                 <div class="ep-info" onclick="reproducirEpisodio('${nombreLimpio}', ${i})">
                     <span class="play-icon">▶</span>

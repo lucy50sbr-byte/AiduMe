@@ -660,6 +660,60 @@ header {
     overflow: visible !important;
 }
 
+/* --- ESTILOS ESPECÍFICOS PARA TV (UNA SOLA SCROLL BAR) --- */
+.tv-device body {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+.tv-device .page {
+    overflow: visible !important;
+}
+
+.tv-device .details-view {
+    overflow: visible !important;
+}
+
+.tv-device .horizontal-scroll {
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+}
+
+.tv-device .pill-container {
+    overflow-x: visible !important;
+}
+
+.tv-device #chat-messages {
+    overflow-y: visible !important;
+}
+
+.tv-device #wp-msg-list {
+    overflow-y: visible !important;
+}
+
+.tv-device .sticker-tabs {
+    overflow-x: visible !important;
+}
+
+.tv-device .sticker-grid {
+    overflow-y: visible !important;
+}
+
+/* Ocultar scrollbars internos en TV para usar solo el scroll principal */
+.tv-device ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.tv-device ::-webkit-scrollbar-track {
+    background: rgba(255, 215, 0, 0.1);
+}
+
+.tv-device ::-webkit-scrollbar-thumb {
+    background: var(--gold);
+    border-radius: 4px;
+}
+
 .episode-row:hover {
     background: rgba(255, 255, 255, 0.07);
     border-left-color: var(--gold);
