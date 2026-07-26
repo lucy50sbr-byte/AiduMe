@@ -258,6 +258,42 @@ async function fetchJikanCached(malId) {
 }
 
 /**
+ * Obtiene datos de múltiples anime usando Anilist primero, con fallback a Jikan
+ */
+async function fetchAnilistBatchWithFallback(malIds) {
+    const results = {};
+    const toFetch = malIds.filter(id => {
+        if (_anilistCache[id]) { results[id] = _anilistCache[id]; return false; }
+        return true;
+    });
+
+    // Procesar en lotes de 5 en paralelo (Anilist permite más requests)
+    for (let i = 0; i < toFetch.length; i += 5) {
+        const batch = toFetch.slice(i, i + 5);
+        const promises = batch.map(id => fetchAnilistByMalId(id));
+        const batchResults = await Promise.all(promises);
+        batch.forEach((id, idx) => {
+            if (batchResults[idx]) {
+                _anilistCache[id] = batchResults[idx];
+                results[id] = batchResults[idx];
+            }
+        });
+        // Pequeña espera entre lotes
+        if (i + 5 < toFetch.length) await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Fallback a Jikan para los que fallaron con Anilist
+    const failedIds = malIds.filter(id => !results[id]);
+    if (failedIds.length > 0) {
+        console.log(`📦 [Batch] ${failedIds.length} IDs fallaron con Anilist, intentando Jikan...`);
+        const jikanResults = await fetchJikanBatch(failedIds);
+        Object.assign(results, jikanResults);
+    }
+
+    return results;
+}
+
+/**
  * Obtiene datos de múltiples anime en paralelo por lotes de 3
  * (respetando el rate limit de Jikan de 3 req/seg).
  */
@@ -448,32 +484,50 @@ async function cargarHome() {
     console.log("🏠 [Top 10] Elemento 'lista-top-10' encontrado:", !!lista);
     if (!lista) return;
 
+    const CACHE_KEY = 'top10_cache';
+    const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 horas en milisegundos
+
     try {
-        console.log("🏠 [Top 10] Iniciando carga...");
+        // 1. Intentar cargar desde caché primero (instantáneo)
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        if (cachedData) {
+            const { data, timestamp } = JSON.parse(cachedData);
+            const age = Date.now() - timestamp;
+            
+            if (age < CACHE_DURATION) {
+                console.log("🏠 [Top 10] Cargando desde caché (edad:", Math.round(age / 60000), "minutos)");
+                renderGrid(data, 'lista-top-10');
+                
+                // Actualizar en background sin bloquear
+                actualizarTop10EnBackground();
+                return;
+            } else {
+                console.log("🏠 [Top 10] Caché expirado, actualizando...");
+            }
+        }
+
+        console.log("🏠 [Top 10] Iniciando carga desde API...");
         
-        // 1. Traer TODOS los perfiles y sumar los log_vistos para contar por anime
-        const { data: perfiles, error } = await _db
-            .from('perfiles')
-            .select('log_vistos');
+        // 2. Traer todos los registros de la tabla vistos
+        const { data: registrosVistos, error } = await _db
+            .from('vistos')
+            .select('anime_id');
 
         if (error) throw error;
 
-        console.log("👥 [Top 10] Perfiles obtenidos:", perfiles?.length || 0);
+        console.log("👥 [Top 10] Registros de vistos obtenidos:", registrosVistos?.length || 0);
 
-        if (!perfiles || perfiles.length === 0) {
+        if (!registrosVistos || registrosVistos.length === 0) {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Aún no hay datos de visualización.</p>';
             return;
         }
 
-        // 2. Contar vistas por anime_id sumando los arrays de cada perfil
+        // 3. Contar vistas por anime_id
         const conteo = {};
-        perfiles.forEach(p => {
-            const log = p.log_vistos || {};
-            for (const animeId in log) {
-                const eps = log[animeId];
-                if (Array.isArray(eps)) {
-                    conteo[animeId] = (conteo[animeId] || 0) + eps.length;
-                }
+        registrosVistos.forEach(registro => {
+            const animeId = registro.anime_id;
+            if (animeId) {
+                conteo[animeId] = (conteo[animeId] || 0) + 1;
             }
         });
 
@@ -484,7 +538,7 @@ async function cargarHome() {
             return;
         }
 
-        // 3. Ordenar por cantidad de vistas (mayor a menor) y tomar top 10
+        // 4. Ordenar por cantidad de vistas (mayor a menor) y tomar top 10
         const top10Ids = Object.entries(conteo)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10)
@@ -492,9 +546,11 @@ async function cargarHome() {
 
         console.log("🏆 [Top 10] IDs del Top 10:", top10Ids);
 
-        // 4. Obtener metadata en paralelo por lotes (RÁPIDO)
-        const metadataMap = await fetchJikanBatch(top10Ids);
-        console.log("📦 [Top 10] Metadata obtenida:", Object.keys(metadataMap).length);
+        // 5. Obtener metadata con Anilist primero, fallback a Jikan
+        console.log("📦 [Top 10] Iniciando fetchAnilistBatchWithFallback...");
+        const metadataMap = await fetchAnilistBatchWithFallback(top10Ids);
+        console.log("📦 [Top 10] Metadata final obtenida:", Object.keys(metadataMap).length, "de", top10Ids.length);
+        console.log("📦 [Top 10] IDs sin metadata:", top10Ids.filter(id => !metadataMap[id]));
         
         const animes = top10Ids
             .filter(id => metadataMap[id])
@@ -505,12 +561,16 @@ async function cargarHome() {
             });
 
         console.log("🎬 [Top 10] Animes a renderizar:", animes.length);
-        console.log("🎬 [Top 10] Datos de animes:", animes);
 
         if (animes.length > 0) {
-            console.log("🎬 [Top 10] Llamando a renderGrid con 'lista-top-10'...");
             renderGrid(animes, 'lista-top-10');
-            console.log("🎬 [Top 10] renderGrid ejecutado");
+            
+            // Guardar en caché
+            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                data: animes,
+                timestamp: Date.now()
+            }));
+            console.log("💾 [Top 10] Guardado en caché");
         } else {
             lista.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los animes más vistos.</p>';
         }
@@ -518,6 +578,64 @@ async function cargarHome() {
     } catch (e) {
         console.error("❌ Error en cargarHome:", e);
         lista.innerHTML = '<p style="text-align:center; color:#ff4444; padding:20px; font-size:0.8rem;">⚠️ No pudimos cargar los animes. Verifica tu conexión a internet.</p>';
+    }
+}
+
+/**
+ * Actualiza el Top 10 en background sin bloquear la UI
+ */
+async function actualizarTop10EnBackground() {
+    const CACHE_KEY = 'top10_cache';
+    
+    try {
+        console.log("🔄 [Top 10 Background] Iniciando actualización en background...");
+        
+        const { data: registrosVistos } = await _db
+            .from('vistos')
+            .select('anime_id');
+
+        if (!registrosVistos || registrosVistos.length === 0) return;
+
+        const conteo = {};
+        registrosVistos.forEach(registro => {
+            const animeId = registro.anime_id;
+            if (animeId) {
+                conteo[animeId] = (conteo[animeId] || 0) + 1;
+            }
+        });
+
+        const top10Ids = Object.entries(conteo)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(e => parseInt(e[0]));
+
+        const metadataMap = await fetchAnilistBatchWithFallback(top10Ids);
+        
+        const animes = top10Ids
+            .filter(id => metadataMap[id])
+            .map(id => {
+                const data = { ...metadataMap[id] };
+                data._viewCount = conteo[id];
+                return data;
+            });
+
+        if (animes.length > 0) {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                data: animes,
+                timestamp: Date.now()
+            }));
+            
+            // Actualizar UI si estamos en la página home
+            const lista = document.getElementById('lista-top-10');
+            if (lista && document.querySelector('.page.active-page')?.id === 'home') {
+                renderGrid(animes, 'lista-top-10');
+                console.log("🔄 [Top 10 Background] UI actualizada");
+            }
+            
+            console.log("💾 [Top 10 Background] Caché actualizado");
+        }
+    } catch (e) {
+        console.error("❌ [Top 10 Background] Error:", e);
     }
 }
 
@@ -1829,6 +1947,10 @@ async function toggleEpisodioVisto(animeId, epNum, checkbox) {
         // Guardar todo el log de una sola vez (1 UPDATE en perfiles)
         await guardarLogVistos(log);
         console.log(`✅ Log de vistos actualizado: Anime ${animeId}, Ep ${epNum}`);
+
+        // Invalidar caché del Top 10 ya que cambiaron las vistas
+        localStorage.removeItem('top10_cache');
+        console.log("🗑️ [Top 10] Caché invalidado por cambio en episodios vistos");
 
         // Refrescar UI
         if (typeof actualizarPerfilDesdeSQL === 'function') {
@@ -5935,8 +6057,31 @@ async function cargarUltimosEpisodios() {
     const listaRecientes = document.getElementById('lista-recientes');
     if (!listaRecientes) return;
 
+    const CACHE_KEY = 'ultimos_episodios_cache';
+    const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 horas en milisegundos
+
     try {
-        // 1. Traer los últimos 20 episodios subidos a nuestra DB
+        // 1. Intentar cargar desde caché primero (instantáneo)
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        if (cachedData) {
+            const { data, timestamp } = JSON.parse(cachedData);
+            const age = Date.now() - timestamp;
+            
+            if (age < CACHE_DURATION) {
+                console.log("📺 [Últimos Episodios] Cargando desde caché (edad:", Math.round(age / 60000), "minutos)");
+                renderGrid(data, 'lista-recientes');
+                
+                // Actualizar en background sin bloquear
+                actualizarUltimosEpisodiosEnBackground();
+                return;
+            } else {
+                console.log("📺 [Últimos Episodios] Caché expirado, actualizando...");
+            }
+        }
+
+        console.log("📺 [Últimos Episodios] Iniciando carga desde API...");
+        
+        // 2. Traer los últimos 20 episodios subidos a nuestra DB
         const { data: enlaces, error } = await _db
             .from('enlaces_episodios')
             .select('*')
@@ -5950,13 +6095,13 @@ async function cargarUltimosEpisodios() {
             return;
         }
 
-        // 2. Obtener IDs únicos de animes
+        // 3. Obtener IDs únicos de animes
         const idsUnicos = [...new Set(enlaces.map(ep => ep.anime_id))];
         
-        // 3. Obtener metadatos desde Anilist (imágenes, nombres reales, etc.)
+        // 4. Obtener metadatos desde Anilist (imágenes, nombres reales, etc.)
         const metadataMap = await fetchAnilistBatch(idsUnicos);
 
-        // 4. Armar la lista usando datos de Anilist para imágenes/nombres
+        // 5. Armar la lista usando datos de Anilist para imágenes/nombres
         const animes = [];
         const vistosIds = new Set();
         
@@ -6000,6 +6145,13 @@ async function cargarUltimosEpisodios() {
 
         if (animes.length > 0) {
             renderGrid(animes, 'lista-recientes');
+            
+            // Guardar en caché
+            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                data: animes,
+                timestamp: Date.now()
+            }));
+            console.log("💾 [Últimos Episodios] Guardado en caché");
         } else {
             listaRecientes.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">No se pudieron cargar los episodios recientes.</p>';
         }
@@ -6010,6 +6162,85 @@ async function cargarUltimosEpisodios() {
         if (listaRecientes) {
             listaRecientes.innerHTML = '<p style="text-align:center; opacity:0.5; padding:20px;">Conectando con la base de datos...</p>';
         }
+    }
+}
+
+/**
+ * Actualiza los últimos episodios en background sin bloquear la UI
+ */
+async function actualizarUltimosEpisodiosEnBackground() {
+    const CACHE_KEY = 'ultimos_episodios_cache';
+    
+    try {
+        console.log("🔄 [Últimos Episodios Background] Iniciando actualización en background...");
+        
+        const { data: enlaces } = await _db
+            .from('enlaces_episodios')
+            .select('*')
+            .order('id', { ascending: false })
+            .limit(20);
+
+        if (!enlaces || enlaces.length === 0) return;
+
+        const idsUnicos = [...new Set(enlaces.map(ep => ep.anime_id))];
+        const metadataMap = await fetchAnilistBatch(idsUnicos);
+
+        const animes = [];
+        const vistosIds = new Set();
+        
+        for (const ep of enlaces) {
+            const id = ep.anime_id;
+            const key = `${id}`;
+            if (vistosIds.has(key)) continue;
+            vistosIds.add(key);
+            
+            const meta = metadataMap[id];
+            if (meta) {
+                animes.push({
+                    ...meta,
+                    episode_number: ep.episodio_num,
+                    _source: 'anilist',
+                    _idioma: ep.idioma || 'sub'
+                });
+            } else {
+                animes.push({
+                    mal_id: id,
+                    title: ep.anime_nombre || `Anime #${id}`,
+                    titles: [{ type: 'Default', title: ep.anime_nombre || `Anime #${id}` }],
+                    images: {
+                        jpg: {
+                            image_url: 'logo-aidume.png',
+                            large_image_url: 'logo-grande.png',
+                            small_image_url: 'logo-aidume.png'
+                        }
+                    },
+                    synopsis: "Episodio subido por la comunidad de AiduMe.",
+                    episodes: ep.episodio_num || 1,
+                    status: 'Currently Airing',
+                    episode_number: ep.episodio_num,
+                    _source: 'db',
+                    _idioma: ep.idioma || 'sub'
+                });
+            }
+        }
+
+        if (animes.length > 0) {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                data: animes,
+                timestamp: Date.now()
+            }));
+            
+            // Actualizar UI si estamos en la página home
+            const lista = document.getElementById('lista-recientes');
+            if (lista && document.querySelector('.page.active-page')?.id === 'home') {
+                renderGrid(animes, 'lista-recientes');
+                console.log("🔄 [Últimos Episodios Background] UI actualizada");
+            }
+            
+            console.log("💾 [Últimos Episodios Background] Caché actualizado");
+        }
+    } catch (e) {
+        console.error("❌ [Últimos Episodios Background] Error:", e);
     }
 }
 

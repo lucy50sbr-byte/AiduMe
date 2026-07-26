@@ -1075,12 +1075,12 @@ function checkUser() {
         }
 
         // --- NUEVO: ACTUALIZACIÓN DEL AVATAR EN LA BARRA DE NAVEGACIÓN ---
-        if (document.getElementById('nav-avatar')) {
-            // Buscamos el avatar real usando el ID guardado localmente
-            const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
-            const av = todos.find(a => a.id === String(data.avatar_id || '1'));
-            document.getElementById('nav-avatar').src = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}`;
-        }
+        // Comentado para evitar conflicto con la actualización en checkUser
+        // if (document.getElementById('nav-avatar')) {
+        //     const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+        //     const av = todos.find(a => a.id === String(data.avatar_id || '1'));
+        //     document.getElementById('nav-avatar').src = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.name}`;
+        // }
 
         // LÓGICA DE ACCESO A MODERACIÓN (Dueño, Admin y Moderador)
         if (data.rol === 'admin' || data.rol === 'dueño' || data.rol === 'moderador') {
@@ -1113,6 +1113,48 @@ function checkUser() {
         }
         
         if (typeof initApp === 'function') initApp(); 
+        
+        // --- ACTUALIZAR AVATAR EN NAVEGACIÓN AL INICIAR ---
+        (async () => {
+            console.log("🔍 [Avatar Nav] Iniciando actualización...");
+            console.log("🔍 [Avatar Nav] currentUser:", currentUser);
+            console.log("🔍 [Avatar Nav] Elemento nav-avatar existe:", !!document.getElementById('nav-avatar'));
+            
+            if (document.getElementById('nav-avatar') && currentUser) {
+                try {
+                    console.log("🔍 [Avatar Nav] Obteniendo datos de Supabase...");
+                    const { data: perfilData, error } = await _db
+                        .from('perfiles')
+                        .select('avatar_id')
+                        .ilike('nombre', currentUser)
+                        .single();
+                    
+                    console.log("🔍 [Avatar Nav] Datos de Supabase:", perfilData);
+                    console.log("🔍 [Avatar Nav] Error Supabase:", error);
+                    
+                    if (perfilData) {
+                        const todos = [...AVATARES_RANGOS, ...AVATARES_TIENDA];
+                        const av = todos.find(a => a.id === String(perfilData.avatar_id || '1'));
+                        const avatarUrl = av ? av.img : `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser}`;
+                        
+                        console.log("🔍 [Avatar Nav] avatar_id:", perfilData.avatar_id);
+                        console.log("🔍 [Avatar Nav] Avatar encontrado:", !!av);
+                        console.log("🔍 [Avatar Nav] URL a asignar:", avatarUrl);
+                        
+                        const navAvatar = document.getElementById('nav-avatar');
+                        navAvatar.src = avatarUrl;
+                        navAvatar.style.opacity = '1';
+                        console.log("✅ [Avatar Nav] Avatar actualizado correctamente");
+                    } else {
+                        console.warn("⚠️ [Avatar Nav] No se obtuvieron datos de perfil");
+                    }
+                } catch (err) {
+                    console.error("❌ [Avatar Nav] Error al obtener avatar:", err);
+                }
+            } else {
+                console.warn("⚠️ [Avatar Nav] No se puede actualizar: nav-avatar o currentUser no disponibles");
+            }
+        })();
     }
 }
 
@@ -1276,7 +1318,8 @@ async function cambiarAvatar(id, url) {
 
         // Actualizamos las imágenes en tiempo real
         if (document.getElementById('user-avatar')) document.getElementById('user-avatar').src = url;
-        if (document.getElementById('nav-avatar')) document.getElementById('nav-avatar').src = url;
+        // Comentado para evitar conflicto con la actualización en checkUser
+        // if (document.getElementById('nav-avatar')) document.getElementById('nav-avatar').src = url;
 
         reproducirSonidoEquipar();
         cerrarSelectorAvatar();
