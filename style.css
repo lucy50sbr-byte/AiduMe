@@ -3660,20 +3660,24 @@ header {
     filter: blur(0);
 }
 
-/* ===== TV MODE: REPRODUCTOR DE VIDEO DEBAJO DE LA LISTA ===== */
+/* ===== TV MODE: REPRODUCTOR Y NAVEGACIÓN EN TV ===== */
 .tv-device #lista-episodios-container {
     display: flex;
     flex-direction: column;
 }
 
+/* El reproductor va arriba en modo TV cuando está activo */
 .tv-device #video-player-container {
-    order: 2;
-    margin-top: 25px;
-    min-height: 350px;
+    order: 1;
+    margin-top: 15px;
+    margin-bottom: 25px;
+    width: 100%;
 }
 
 .tv-device #grid-episodios {
-    order: 1;
+    order: 2;
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 .tv-device .video-iframe-aidume {
@@ -3688,33 +3692,21 @@ header {
     font-size: 1.1rem;
 }
 
-.tv-device #video-player-container::before {
-    content: '';
-    display: block;
-    border-top: 2px solid var(--gold);
-    margin-bottom: 20px;
-    opacity: 0.3;
-}
-
 /* ===== TV MODE: MEJORA DE NAVEGACIÓN CON D-PAD ===== */
 
 /* En TV, cuando los detalles están visibles, la barra de navegación inferior se oculta
    para evitar que el foco D-pad se escape hacia ella mientras navegas episodios */
-.tv-device .details-view[style*="display: block"] ~ .bottom-nav {
-    display: none !important;
-}
-
-/* Lo mismo pero con display: flex (por si el JS usa flex en lugar de block) */
+.tv-device .details-view[style*="display: block"] ~ .bottom-nav,
 .tv-device .details-view[style*="display: flex"] ~ .bottom-nav {
     display: none !important;
 }
 
 /* Mejorar el foco en los episodios para que sea más visible en TV */
 .tv-device .episode-row {
-    padding: 18px 20px;
+    padding: 16px 20px;
     margin-bottom: 8px;
     font-size: 1.1rem;
-    scroll-margin: 20px;
+    scroll-margin: 30px;
 }
 
 /* Prevenir que el scroll automático mueva el foco a la barra inferior */
@@ -3763,6 +3755,12 @@ header {
 /* --- BARRA DE NAVEGACIÓN INFERIOR MÁS GRANDE --- */
 .tv-device .bottom-nav {
     height: 90px;
+    max-width: 650px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 20px 20px 0 0;
+    border-left: 1px solid rgba(255, 215, 0, 0.1);
+    border-right: 1px solid rgba(255, 215, 0, 0.1);
 }
 
 .tv-device .nav-item {
@@ -3789,7 +3787,7 @@ header {
     opacity: 1;
 }
 
-/* --- TARJETAS DE ANIME MÁS GRANDES --- */
+/* --- TARJETAS DE ANIME MÁS GRANDES Y NAVEGABLES --- */
 .tv-device .card {
     transform: scale(1);
     transition: transform 0.2s, box-shadow 0.2s;
@@ -3844,30 +3842,31 @@ header {
     font-size: 1.4rem;
 }
 
-/* --- CARD GRID EN TV: 3 columnas fijas --- */
+/* --- CARD GRID EN TV --- */
 .tv-device #lista-todos {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 20px;
+    justify-items: center;
 }
 
 /* --- EPISODIOS EN TV: Foco nítido con animación --- */
 .tv-device .episode-row {
-    padding: 20px 25px;
+    padding: 18px 22px;
     margin-bottom: 10px;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     border-radius: 15px;
 }
 
 .tv-device .episode-row:focus {
-    outline: 5px solid var(--gold) !important;
-    background: rgba(255, 215, 0, 0.2) !important;
-    transform: scale(1.02) translateX(10px);
-    box-shadow: 0 0 40px rgba(255, 215, 0, 0.4);
+    outline: 4px solid var(--gold) !important;
+    background: rgba(255, 215, 0, 0.25) !important;
+    transform: scale(1.02);
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.4);
 }
 
 .tv-device .ep-name {
     font-size: 1.1rem;
-    max-width: 400px;
+    max-width: 450px;
 }
 
 .tv-device .ep-num {
@@ -3997,9 +3996,9 @@ header {
     font-size: 1rem;
 }
 
-/* --- VISTA DE DETALLES EN TV: Banner más grande --- */
+/* --- VISTA DE DETALLES EN TV --- */
 .tv-device .details-banner {
-    height: 400px;
+    height: 350px;
 }
 
 .tv-device #dt-title {
@@ -4011,9 +4010,12 @@ header {
     line-height: 1.6;
 }
 
-/* --- HOME EN TV: Torneo y secciones más grandes --- */
+/* --- HOME EN TV --- */
 .tv-device #battle-section {
-    padding: 30px;
+    padding: 25px;
+    max-width: 750px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .tv-device .battle-item img {
@@ -4032,14 +4034,17 @@ header {
     font-size: 1rem !important;
 }
 
-/* --- HORIZONTAL SCROLL EN TV: Ocultar flecha, navegación con D-pad --- */
+/* --- HORIZONTAL SCROLL EN TV --- */
 .tv-device .scroll-arrow-overlay {
     display: none;
 }
 
 /* --- FILTROS EN TV --- */
 .tv-device .filter-container-flv {
-    padding: 25px;
+    padding: 20px;
+    max-width: 850px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .tv-device .filter-group select {
@@ -4066,7 +4071,7 @@ header {
     font-size: 1.2rem;
 }
 
-/* --- FOCUS GLOBAL PARA TV: Todos los elementos interactivos --- */
+/* --- FOCUS GLOBAL PARA TV --- */
 .tv-device *:focus {
     outline: 4px solid var(--gold) !important;
     outline-offset: 3px;
@@ -4076,196 +4081,49 @@ header {
     box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
 }
 
-/* ===== TV: MEJORAS ADICIONALES DE INTERFAZ ===== */
-
-/* --- INDICADOR DE EPISODIO ACTUAL --- */
-.tv-device .episode-row.current-episode {
-    border-left: 4px solid #00ff88 !important;
-    background: rgba(0, 255, 136, 0.1) !important;
+.tv-device header {
+    padding: 15px 0 10px 0;
 }
 
-.tv-device .episode-row.current-episode .play-icon {
-    background: #00ff88 !important;
-    color: #000 !important;
+.tv-device .main-logo-hero {
+    height: 110px;
+    max-width: 70%;
 }
 
-/* --- SEPARADOR ENTRE EPISODIOS VISTOS Y NO VISTOS --- */
-.tv-device .ep-section-divider {
-    text-align: center;
-    padding: 15px;
-    margin: 10px 0;
-    color: var(--gold);
-    font-weight: bold;
-    font-size: 0.85rem;
-    border-top: 1px solid rgba(255, 215, 0, 0.2);
-    border-bottom: 1px solid rgba(255, 215, 0, 0.2);
-    background: rgba(255, 215, 0, 0.05);
-    text-transform: uppercase;
-    letter-spacing: 2px;
+.tv-device #app-content {
+    margin-top: 0;
 }
 
-/* --- MENSAJE DE "SIGUE BAJANDO" EN TV --- */
-.tv-device .tv-scroll-hint {
-    text-align: center;
-    padding: 12px;
-    margin: 5px 0;
-    color: rgba(255, 215, 0, 0.5);
-    font-size: 0.85rem;
-    animation: tvHintPulse 2s infinite;
-    border: 1px dashed rgba(255, 215, 0, 0.2);
-    border-radius: 10px;
+.tv-device .page {
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 30px;
+    padding-right: 30px;
 }
 
-@keyframes tvHintPulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.8; }
+.tv-device .search-container {
+    max-width: 650px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
-/* --- INDICADOR VISUAL DE "SELECCIONADO" EN TV --- */
-.tv-device .tv-selected-indicator {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid var(--gold);
-    border-radius: 20px;
-    padding: 8px 20px;
-    color: var(--gold);
-    font-size: 0.8rem;
-    z-index: 2000;
-    backdrop-filter: blur(10px);
-    white-space: nowrap;
+.tv-device .profile-header-card {
+    max-width: 750px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
-/* --- EPISODIOS EN TV: NÚMEROS MÁS GRANDES --- */
-.tv-device .ep-num {
-    font-size: 1rem;
-    font-weight: bold;
-    opacity: 0.7;
+.tv-device .horizontal-scroll .card {
+    flex: 0 0 140px;
 }
 
-/* --- EPISODIOS EN TV: ÁREA DE CHECKBOX MÁS GRANDE --- */
-.tv-device .ep-check-area {
-    gap: 8px;
-    min-width: 130px !important;
+.tv-device .details-content {
+    max-width: 950px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
-.tv-device .custom-checkbox {
-    width: 28px;
-    height: 28px;
-}
-
-.tv-device .checkmark {
-    height: 28px;
-    width: 28px;
-    border-width: 3px;
-}
-
-.tv-device .check-text {
-    font-size: 0.75rem;
-}
-
-/* --- EPISODIOS EN TV: BOTÓN DE REPORTE MÁS GRANDE --- */
-.tv-device .ep-check-area span[onclick*="reportarFalla"] {
-    font-size: 1.8rem !important;
-    padding: 8px 12px !important;
-}
-
-/* --- BOTÓN "VOLVER" EN TV CON ATAJO --- */
-.tv-device .back-btn::after {
-    content: ' (ESC)';
-    font-size: 0.7rem;
-    opacity: 0.5;
-    margin-left: 5px;
-}
-
-/* --- PREMIUM BADGE EN TV --- */
-.tv-device .premium-badge-tv {
-    display: inline-block;
-    background: linear-gradient(135deg, #ffd700, #ffaa00);
-    color: #000;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-weight: bold;
-    font-size: 0.7rem;
-    margin-left: 10px;
-    text-transform: uppercase;
-}
-
-/* --- INFO BAR FIJA EN TV PARA EPISODIO ACTUAL --- */
-.tv-device #tv-current-ep-bar {
-    display: none;
-    position: sticky;
-    top: 0;
-    background: rgba(0, 0, 0, 0.9);
-    border-bottom: 2px solid var(--gold);
-    padding: 10px 15px;
-    z-index: 100;
-    text-align: center;
-    color: var(--gold);
-    font-weight: bold;
-    font-size: 0.9rem;
-    backdrop-filter: blur(10px);
-}
-
-/* --- LISTA DE EPISODIOS CON NÚMEROS --- */
-.tv-device .ep-number-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--gold);
-    color: #000;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    font-weight: bold;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-}
-
-/* --- NOTIFICACIÓN DE ACCIÓN EN TV --- */
-.tv-device .tv-toast {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.9);
-    border: 2px solid var(--gold);
-    border-radius: 20px;
-    padding: 20px 40px;
-    color: white;
-    font-size: 1.2rem;
-    z-index: 99999;
-    text-align: center;
-    animation: tvToastAnim 2s ease forwards;
-    pointer-events: none;
-}
-
-@keyframes tvToastAnim {
-    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
-    15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-    75% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
-}
-
-/* --- MEJORA DEL FOCO EN CARD PARA TV: Efecto de luz --- */
-.tv-device .card:focus::after {
-    content: '';
-    position: absolute;
-    inset: -4px;
-    border-radius: 16px;
-    background: linear-gradient(135deg, rgba(255,215,0,0.3), transparent, rgba(255,215,0,0.3));
-    z-index: -1;
-    animation: cardGlow 2s infinite;
-}
-
-@keyframes cardGlow {
-    0%, 100% { opacity: 0.5; }
-    50% { opacity: 1; }
-}
-
-/* --- HINT DE NAVEGACIÓN EN HOME DE TV --- */
 .tv-device .tv-nav-hint {
     text-align: center;
     padding: 15px;
@@ -4279,3 +4137,4 @@ header {
     display: inline-block;
     margin: 0 10px;
 }
+
