@@ -3674,14 +3674,21 @@ header {
     width: 100%;
 }
 
-.tv-device #grid-episodios {
-    order: 2;
-    max-height: none !important;
-    overflow: visible !important;
+.tv-device #video-player-container:focus {
+    outline: 6px solid var(--gold) !important;
+    outline-offset: 4px;
+    box-shadow: 0 0 40px rgba(255, 215, 0, 0.5);
+    transform: scale(1.02);
 }
 
 .tv-device .video-iframe-aidume {
     min-height: 350px;
+}
+
+.tv-device .video-iframe-aidume:focus {
+    outline: 6px solid var(--gold) !important;
+    outline-offset: 4px;
+    box-shadow: 0 0 40px rgba(255, 215, 0, 0.5);
 }
 
 .tv-device #video-info-display {
@@ -3752,39 +3759,9 @@ header {
     height: 2.8em;
 }
 
-/* --- BARRA DE NAVEGACIÓN INFERIOR MÁS GRANDE --- */
+/* --- BARRA DE NAVEGACIÓN INFERIOR OCULTA EN TV --- */
 .tv-device .bottom-nav {
-    height: 90px;
-    max-width: 650px;
-    left: 50%;
-    transform: translateX(-50%);
-    border-radius: 20px 20px 0 0;
-    border-left: 1px solid rgba(255, 215, 0, 0.1);
-    border-right: 1px solid rgba(255, 215, 0, 0.1);
-}
-
-.tv-device .nav-item {
-    font-size: 0.9rem;
-    gap: 8px;
-    padding: 8px 20px;
-}
-
-.tv-device .nav-item i {
-    font-size: 1.8rem;
-}
-
-.tv-device .nav-item img {
-    width: 40px;
-    height: 40px;
-}
-
-.tv-device .nav-item:focus {
-    outline: 4px solid var(--gold) !important;
-    outline-offset: 4px;
-    transform: scale(1.1);
-    color: var(--gold) !important;
-    filter: grayscale(0);
-    opacity: 1;
+    display: none !important;
 }
 
 /* --- TARJETAS DE ANIME MÁS GRANDES Y NAVEGABLES --- */

@@ -473,16 +473,23 @@ function esDispositivoTV() {
     );
 
     // Detectar modo TV en navegadores: userAgentMode o la propiedad 'displayMode'
+    // Mejorado: removimos exclusiones de Chrome/Brave para permitir detección en más navegadores de TV
     const esTVMode = window.matchMedia && (
         window.matchMedia('(display-mode: standalone)').matches === false && // No es PWA
         esPantallaGrande &&
-        ua.toLowerCase().includes('brave') === false && // No confundir Brave desktop con TV
-        ua.toLowerCase().includes('chrome') === false && // Evitar falsos positivos en PC con Chrome en 1920px
         !navigator.userAgentData?.mobile &&
         !navigator.userAgentData?.formFactor?.includes('desktop')
     );
 
-    return patronesTV.some(p => p.test(ua)) || esTVMode;
+    // Detección adicional: si la pantalla es muy grande (1920x1080 o más) y no es móvil, asumir TV
+    const esPantallaTV = window.screen && (
+        window.screen.width >= 1920 && 
+        window.screen.height >= 1080 &&
+        !navigator.userAgentData?.mobile &&
+        (!('ontouchstart' in window) || navigator.maxTouchPoints <= 1)
+    );
+
+    return patronesTV.some(p => p.test(ua)) || esTVMode || esPantallaTV;
 }
 
 /**
@@ -686,9 +693,12 @@ if (urlParams.get('tv') === '1') {
 if (esDispositivoTV() || urlParams.get('tv') === '1') {
     localStorage.setItem('hide_chat', 'true');
     console.log("📺 Dispositivo TV detectado: Chat oculto automáticamente.");
+    console.log("📺 Resolución:", window.screen?.width, "x", window.screen?.height);
+    console.log("📺 User Agent:", navigator.userAgent);
 
     // Agregar clase tv-device al body para que el CSS pueda adaptarse
     document.documentElement.classList.add('tv-device');
+    console.log("📺 Clase 'tv-device' agregada al documento - Estilos de TV activados");
 
     // En vez del login normal, mostrar el sistema de código PIN
     window.addEventListener('load', () => {
